@@ -96,7 +96,12 @@ client.manager = new Kazagumo({
         const guild = client.guilds.cache.get(guildId);
         if (guild) guild.shard.send(payload);
     }
-}, new Connectors.DiscordJS(client), Nodes);
+}, new Connectors.DiscordJS(client), Nodes, {
+    moveOnDisconnect: true,
+    resume: true,
+    reconnectTries: 10,
+    restTimeout: 10000
+});
 
 // --- Khởi tạo PlayerService ---
 const playerService = new PlayerService(client, client.manager);
@@ -109,6 +114,12 @@ client.manager.shoukaku.on('ready', (name) => {
 });
 client.manager.shoukaku.on('error', (name, error) => {
     console.error(`❌ Lỗi Lavalink Node ${name}:`, error?.message || error);
+});
+client.manager.shoukaku.on('close', (name, code, reason) => {
+    console.warn(`⚠️ Lavalink Node ${name} đã ngắt kết nối (code: ${code}, lý do: ${reason || 'Không rõ'})`);
+});
+client.manager.shoukaku.on('disconnect', (name, count) => {
+    console.warn(`⚠️ Lavalink Node ${name} bị mất kết nối, đang thử kết nối lại (lần ${count})...`);
 });
 
 // Bài hát bắt đầu phát → gửi Now Playing embed

@@ -60,10 +60,14 @@ async function execute(interaction, playerService) {
         }
     } catch (err) {
         console.error('[play] Error:', err);
+        const errMsg = err?.message || String(err);
+        const userMsg = errMsg.includes('No node')
+            ? '❌ Máy chủ phát nhạc (Lavalink) hiện đang kết nối lại. Vui lòng thử lại sau vài giây!'
+            : `❌ Lỗi khi tải nhạc: ${errMsg}`;
         if (interaction.deferred) {
-            await interaction.editReply(`❌ Lỗi khi tải nhạc: ${err.message || err}`);
+            await interaction.editReply(userMsg);
         } else {
-            await interaction.reply({ content: `❌ Lỗi: ${err.message || err}`, ephemeral: true });
+            await interaction.reply({ content: userMsg, ephemeral: true });
         }
     }
 }

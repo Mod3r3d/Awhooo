@@ -5,10 +5,22 @@
 
 const defaultNodes = [
     {
-        name: 'Kasawa_Node',
-        url: 'lava2.kasawa.pro:2334',
+        name: 'Nazha_SSL',
+        url: 'lavalink.nazha.online:443',
+        auth: 'nazhafreelava',
+        secure: true
+    },
+    {
+        name: 'Millohost_SSL',
+        url: 'lava-v4.millohost.my.id:443',
+        auth: 'https://discord.gg/mjS5J2K3ep',
+        secure: true
+    },
+    {
+        name: 'GDjkhp_SSL',
+        url: 'nodelink.gdjkhp.com:443',
         auth: 'youshallnotpass',
-        secure: false
+        secure: true
     }
 ];
 

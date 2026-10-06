@@ -42,7 +42,11 @@ async function execute(interaction, playerService) {
         await interaction.editReply(`⏭️ Đang phát ngay: **${track.title}**`);
     } catch (err) {
         console.error('[playskip] Error:', err);
-        await interaction.editReply('❌ Đã xảy ra lỗi!');
+        const errMsg = err?.message || String(err);
+        const userMsg = errMsg.includes('No node')
+            ? '❌ Máy chủ phát nhạc (Lavalink) hiện đang kết nối lại. Vui lòng thử lại sau vài giây!'
+            : `❌ Lỗi khi tải nhạc: ${errMsg}`;
+        await interaction.editReply(userMsg);
     }
 }
 
