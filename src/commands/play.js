@@ -35,6 +35,9 @@ async function execute(interaction, ctx) {
     const query = interaction.options.getString('query');
     const guildId = interaction.guild.id;
 
+    // Phản hồi ngay để người dùng không phải chờ lâu ở trạng thái "đang suy nghĩ..."
+    await interaction.editReply('🔍 Đang tìm kiếm và nạp bài hát...');
+
     // Bảng Now Playing hiển thị riêng cho người gọi lệnh (ephemeral)
     const player = await playerService.getOrCreatePlayer({
         guildId,

@@ -52,8 +52,8 @@ module.exports = {
      * Hỗ trợ cả biến `AUTO_DISCONNECT_SECONDS` (giây) đã có trong .env.example.
      */
     VOICE_EMPTY_LEAVE_MS: process.env.AUTO_DISCONNECT_SECONDS
-        ? envInt('AUTO_DISCONNECT_SECONDS', 180) * 1000
-        : envInt('VOICE_EMPTY_LEAVE_MS', 3 * 60 * 1000),
+        ? envInt('AUTO_DISCONNECT_SECONDS', 30) * 1000
+        : envInt('VOICE_EMPTY_LEAVE_MS', 30 * 1000),
 
     // --- Giao diện Now Playing ---
     /** Thời gian không tương tác trước khi vô hiệu hoá nút trên bảng (ms) */

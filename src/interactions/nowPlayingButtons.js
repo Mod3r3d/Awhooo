@@ -50,8 +50,20 @@ async function refreshPanel(interaction, player, state) {
 async function handle(interaction, ctx, customId) {
     const player = ctx.manager.players.get(interaction.guild.id);
 
-    // Player đã chết → báo lỗi thay vì để Discord hiện "tương tác thất bại"
+    // Player đã chết hoặc không tồn tại
     if (!player) {
+        if (customId === 'np_stop') {
+            try { await ctx.manager.destroyPlayer(interaction.guild.id); } catch (_) {}
+            try { await ctx.manager.shoukaku.leaveVoiceChannel(interaction.guild.id); } catch (_) {}
+            try {
+                const guild = ctx.client.guilds.cache.get(interaction.guild.id);
+                if (guild?.members?.me?.voice?.channelId) {
+                    await guild.members.me.voice.disconnect();
+                }
+            } catch (_) {}
+            const embed = NowPlayingUI.createStopped('stopped');
+            return interaction.update({ content: '', embeds: [embed], components: [] }).catch(() => {});
+        }
         return respondEphemeral(interaction, t('common.noPlayer'));
     }
 

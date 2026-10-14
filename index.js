@@ -167,11 +167,10 @@ manager = new Kazagumo(
             new KazagumoSpotify({
                 clientId: spotifyClientId,
                 clientSecret: spotifyClientSecret,
-                playlistPageLimit: 50,
-                albumPageLimit: 10,
+                playlistPageLimit: 1,
+                albumPageLimit: 1,
                 searchLimit: 10,
-                searchMarket: 'VN',
-                lavalinkPluginTries: 2
+                searchMarket: 'VN'
             })
         ],
         send: (guildId, payload) => {
@@ -212,14 +211,24 @@ playerService = new PlayerService(client, manager, {
 voicePresence = new VoicePresenceService(client, manager, {
     idleMs: constants.VOICE_EMPTY_LEAVE_MS,
     onIdle: async (guildId) => {
-        const player = manager.players.get(guildId);
-        if (!player) return;
-
-        const channel = client.channels.cache.get(player.textId);
         log.info(`Không còn ai trong kênh thoại — rời phòng tại guild ${guildId}.`);
-        await playerService.stop(player);
-        if (channel && typeof channel.send === 'function') {
-            await channel.send('👋 Không còn ai trong kênh thoại nên tôi đã rời phòng.').catch(() => {});
+        const player = manager.players.get(guildId);
+
+        if (player) {
+            const channel = client.channels.cache.get(player.textId);
+            await playerService.stop(player);
+            if (channel && typeof channel.send === 'function') {
+                await channel.send('👋 Không còn ai trong kênh thoại nên tôi đã rời phòng.').catch(() => {});
+            }
+        } else {
+            try { await manager.destroyPlayer(guildId); } catch (_) {}
+            try { await manager.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
+            try {
+                const guild = client.guilds.cache.get(guildId);
+                if (guild?.members?.me?.voice?.channelId) {
+                    await guild.members.me.voice.disconnect();
+                }
+            } catch (_) {}
         }
     }
 });

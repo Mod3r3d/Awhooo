@@ -65,16 +65,30 @@ class VoicePresenceService {
      * @param {import('discord.js').VoiceState} newState
      */
     async handle(_oldState, newState) {
-        const guild = newState.guild;
+        const guild = newState.guild || _oldState?.guild;
         if (!guild) return;
 
-        const player = this.manager.players.get(guild.id);
-        if (!player || !player.voiceId) return;
+        // Kiểm tra bot có đang ở trong kênh thoại nào không
+        const botVoiceChannelId = guild.members.me?.voice?.channelId;
+        if (!botVoiceChannelId) {
+            this.cancel(guild.id);
+            return;
+        }
 
-        const channel = guild.channels.cache.get(player.voiceId);
+        const channel = guild.channels.cache.get(botVoiceChannelId)
+            || await guild.channels.fetch(botVoiceChannelId).catch(() => null);
         if (!channel) return;
 
-        const humans = countHumans(channel.members?.values?.() ?? []);
+        // Đếm số người dùng (không phải bot) trong kênh thoại
+        let humans = 0;
+        if (channel.members) {
+            for (const member of channel.members.values()) {
+                if (member.id === this.client.user?.id || member.user?.bot) continue;
+                // Nếu người này vừa rời kênh hoặc ngắt kết nối trong sự kiện này
+                if (member.id === newState.id && newState.channelId !== botVoiceChannelId) continue;
+                humans++;
+            }
+        }
 
         if (humans > 0) {
             this.cancel(guild.id);

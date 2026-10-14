@@ -409,22 +409,38 @@ class PlayerService {
      * @param {object} player - Kazagumo player
      */
     async stop(player) {
-        const state = getState(player.guildId);
+        const guildId = player?.guildId;
+        if (!guildId) return;
+
+        const state = getState(guildId);
         state.incrementGeneration();
 
         await this.finalisePanels(state, 'stopped');
         state.clearPanels();
 
-        player.queue.length = 0;
-        player.queue.current = null;
+        if (player.queue) {
+            player.queue.length = 0;
+            player.queue.current = null;
+        }
+
         try {
             await player.destroy();
-        } catch {
-            /* player đã chết */
-        }
-        this.manager.players.delete(player.guildId);
+        } catch {}
+        try {
+            await this.manager.destroyPlayer(guildId);
+        } catch {}
+        try {
+            await this.manager.shoukaku.leaveVoiceChannel(guildId);
+        } catch {}
+        try {
+            const guild = this.client.guilds.cache.get(guildId);
+            if (guild?.members?.me?.voice?.channelId) {
+                await guild.members.me.voice.disconnect();
+            }
+        } catch {}
 
-        this.persistState(player.guildId, state, player.volume);
+        this.manager.players.delete(guildId);
+        this.persistState(guildId, state, player.volume);
     }
 
     /**
@@ -745,7 +761,7 @@ class PlayerService {
         await this.finalisePanels(state, 'ended');
         state.clearPanels();
         this.persistState(player.guildId, state, player.volume);
-        player.destroy();
+        await this.stop(player);
     }
 
     /**
