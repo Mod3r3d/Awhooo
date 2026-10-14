@@ -72,14 +72,12 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const startedAt = Date.now();
 
-/** Chuyển mã trạng thái node Lavalink thành tên dễ đọc */
+/** Chuyển mã trạng thái node Lavalink thành tên dễ đọc (Shoukaku: 0=CONNECTING, 1=CONNECTED, 2=DISCONNECTING, 3=DISCONNECTED) */
 const NODE_STATES = {
     0: 'connecting',
-    1: 'nearly',
-    2: 'connected',
-    3: 'reconnecting',
-    4: 'disconnecting',
-    5: 'disconnected'
+    1: 'connected',
+    2: 'disconnecting',
+    3: 'disconnected'
 };
 
 /** Các đối tượng được gán sau khi khởi tạo */
@@ -162,7 +160,7 @@ client = new Client({
 
 manager = new Kazagumo(
     {
-        defaultSearchEngine: 'youtube',
+        defaultSearchEngine: 'youtube_music',
         plugins: [
             new KazagumoSpotify({
                 clientId: spotifyClientId,
@@ -292,10 +290,45 @@ manager.on('playerDestroy', (player) => {
     playerService.onPlayerDestroy(player.guildId);
 });
 
-manager.on('playerResolveError', (player, track, message) => {
+manager.on('playerResolveError', async (player, track, message) => {
     log.error(`Không phân giải được bài hát "${track?.title}":`, message);
+    const channel = client.channels.cache.get(player.textId);
+    if (channel && typeof channel.send === 'function') {
+        channel.send(`⚠️ Không thể phát bài hát **${track?.title || 'hiện tại'}**: ${message || 'Lỗi nguồn phát'}. Đang chuyển bài...`).catch(() => {});
+    }
+    if (player.queue.size > 0) {
+        player.skip();
+    } else {
+        await playerService.stop(player).catch(() => {});
+    }
 });
-manager.on('playerException', (_player, data) => log.error('Player exception:', data));
+
+manager.on('playerException', async (player, data) => {
+    log.error(`Lỗi phát nhạc tại guild ${player.guildId}:`, data);
+    const channel = client.channels.cache.get(player.textId);
+    if (channel && typeof channel.send === 'function') {
+        channel.send('⚠️ Bài hát bị lỗi luồng phát hoặc bị chặn bản quyền. Đang tự động chuyển bài tiếp theo...').catch(() => {});
+    }
+    if (player.queue.size > 0) {
+        player.skip();
+    } else {
+        await playerService.stop(player).catch(() => {});
+    }
+});
+
+manager.on('playerStuck', async (player, track, thresholdMs) => {
+    log.warn(`Bài hát "${track?.title}" bị nghẽn phát (${thresholdMs}ms) tại guild ${player.guildId}.`);
+    const channel = client.channels.cache.get(player.textId);
+    if (channel && typeof channel.send === 'function') {
+        channel.send(`⚠️ Bài hát **${track?.title || 'hiện tại'}** bị nghẽn luồng dữ liệu. Đang chuyển bài tiếp theo...`).catch(() => {});
+    }
+    if (player.queue.size > 0) {
+        player.skip();
+    } else {
+        await playerService.stop(player).catch(() => {});
+    }
+});
+
 manager.on('playerClosed', (_player, data) => log.warn('Kết nối thoại bị đóng:', data));
 
 // ============================================================

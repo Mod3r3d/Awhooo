@@ -10,7 +10,7 @@ const definitions = [
 ];
 
 const meta = {
-    requiresVoice: true,
+    requiresVoice: false,
     defer: 'ephemeral'
 };
 
@@ -22,9 +22,6 @@ async function execute(interaction, ctx) {
     const player = ctx.player || ctx.manager.players.get(interaction.guild.id);
 
     if (player) {
-        if (player.voiceId && ctx.voiceChannel?.id !== player.voiceId) {
-            return interaction.editReply(ctx.t('common.needSameVoice'));
-        }
         await ctx.playerService.stop(player);
     } else {
         // Giải phóng và ngắt kết nối voice ngay cả khi player không còn trong bộ nhớ

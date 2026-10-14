@@ -260,7 +260,9 @@ class PlayerService {
         }
 
         if (!player.playing && !player.paused) {
-            await player.play();
+            await player.play().catch((err) => {
+                this.log.error('Lỗi khi bắt đầu phát trong enqueue:', err);
+            });
         }
 
         return {

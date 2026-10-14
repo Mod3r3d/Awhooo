@@ -68,25 +68,39 @@ class VoicePresenceService {
         const guild = newState.guild || _oldState?.guild;
         if (!guild) return;
 
-        // Kiểm tra bot có đang ở trong kênh thoại nào không
-        const botVoiceChannelId = guild.members.me?.voice?.channelId;
+        // 1. Kiểm tra bot có đang ở trong kênh thoại nào không (thử từ voiceStates, player, Shoukaku, và guild member)
+        const botVoiceChannelId =
+            guild.voiceStates?.cache?.get(this.client.user?.id)?.channelId ||
+            this.manager.players.get(guild.id)?.voiceId ||
+            this.manager.shoukaku.connections.get(guild.id)?.channelId ||
+            guild.members.me?.voice?.channelId;
+
         if (!botVoiceChannelId) {
             this.cancel(guild.id);
             return;
         }
 
-        const channel = guild.channels.cache.get(botVoiceChannelId)
-            || await guild.channels.fetch(botVoiceChannelId).catch(() => null);
-        if (!channel) return;
-
-        // Đếm số người dùng (không phải bot) trong kênh thoại
+        // 2. Đếm số người dùng (không phải bot) trong kênh thoại
         let humans = 0;
-        if (channel.members) {
-            for (const member of channel.members.values()) {
-                if (member.id === this.client.user?.id || member.user?.bot) continue;
+
+        if (guild.voiceStates?.cache?.size) {
+            for (const vs of guild.voiceStates.cache.values()) {
+                if (vs.channelId !== botVoiceChannelId) continue;
+                if (vs.id === this.client.user?.id) continue;
                 // Nếu người này vừa rời kênh hoặc ngắt kết nối trong sự kiện này
-                if (member.id === newState.id && newState.channelId !== botVoiceChannelId) continue;
+                if (vs.id === newState.id && newState.channelId !== botVoiceChannelId) continue;
+                if (vs.member?.user?.bot) continue;
                 humans++;
+            }
+        } else {
+            const channel = guild.channels.cache.get(botVoiceChannelId)
+                || await guild.channels.fetch(botVoiceChannelId).catch(() => null);
+            if (channel?.members) {
+                for (const member of channel.members.values()) {
+                    if (member.id === this.client.user?.id || member.user?.bot) continue;
+                    if (member.id === newState.id && newState.channelId !== botVoiceChannelId) continue;
+                    humans++;
+                }
             }
         }
 

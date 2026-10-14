@@ -108,6 +108,20 @@ class CommandHandler {
                 await respondEphemeral(interaction, t('common.needVoice'));
                 return { ok: false };
             }
+
+            if (meta.requiresVoice && voiceChannel.permissionsFor && ctx.client.user) {
+                const perms = voiceChannel.permissionsFor(ctx.client.user);
+                if (perms) {
+                    if (!perms.has('Connect')) {
+                        await respondEphemeral(interaction, '❌ Bot không có quyền tham gia kênh thoại này (cần quyền **Connect**).');
+                        return { ok: false };
+                    }
+                    if (!perms.has('Speak')) {
+                        await respondEphemeral(interaction, '❌ Bot không có quyền phát âm thanh trong kênh thoại này (cần quyền **Speak**).');
+                        return { ok: false };
+                    }
+                }
+            }
         }
 
         // --- Player ---
@@ -144,6 +158,7 @@ class CommandHandler {
 
         const { meta, execute } = entry;
         const ctx = this.ctx;
+        const start = Date.now();
 
         try {
             const pre = await this.preflight(interaction, meta);
@@ -160,8 +175,9 @@ class CommandHandler {
                 player: pre.player,
                 voiceChannel: pre.voiceChannel
             });
+            ctx.logger.info(`[Command /${interaction.commandName}] hoàn thành sau ${Date.now() - start}ms.`);
         } catch (err) {
-            ctx.logger.error(`Lỗi khi chạy lệnh /${interaction.commandName}:`, err);
+            ctx.logger.error(`Lỗi khi chạy lệnh /${interaction.commandName} (${Date.now() - start}ms):`, err);
             await respondError(interaction, err);
         }
     }

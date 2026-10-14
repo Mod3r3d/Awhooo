@@ -50,9 +50,11 @@ async function refreshPanel(interaction, player, state) {
 async function handle(interaction, ctx, customId) {
     const player = ctx.manager.players.get(interaction.guild.id);
 
-    // Player đã chết hoặc không tồn tại
-    if (!player) {
-        if (customId === 'np_stop') {
+    // Nút dừng luôn được phép thực thi ngay lập tức để giải phóng tài nguyên
+    if (customId === 'np_stop') {
+        if (player) {
+            await ctx.playerService.stop(player);
+        } else {
             try { await ctx.manager.destroyPlayer(interaction.guild.id); } catch (_) {}
             try { await ctx.manager.shoukaku.leaveVoiceChannel(interaction.guild.id); } catch (_) {}
             try {
@@ -61,14 +63,20 @@ async function handle(interaction, ctx, customId) {
                     await guild.members.me.voice.disconnect();
                 }
             } catch (_) {}
-            const embed = NowPlayingUI.createStopped('stopped');
-            return interaction.update({ content: '', embeds: [embed], components: [] }).catch(() => {});
         }
+        const embed = NowPlayingUI.createStopped('stopped');
+        return interaction.update({ content: '', embeds: [embed], components: [] }).catch(() => {
+            return interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => {});
+        });
+    }
+
+    // Player đã chết hoặc không tồn tại
+    if (!player) {
         return respondEphemeral(interaction, t('common.noPlayer'));
     }
 
     const memberVoice = interaction.member?.voice?.channel;
-    if (!memberVoice || memberVoice.id !== player.voiceId) {
+    if (!memberVoice || (player.voiceId && memberVoice.id !== player.voiceId)) {
         return respondEphemeral(interaction, t('common.needSameVoice'));
     }
 
