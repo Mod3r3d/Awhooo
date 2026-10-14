@@ -1,15 +1,70 @@
+/**
+ * nowPlayingButtons — Xử lý toàn bộ nút trên bảng Now Playing (tiền tố `np_`).
+ *
+ * Bảng có thể là ephemeral (chỉ người gọi lệnh thấy) hoặc công khai (do
+ * `/nowplaying` tạo). Mọi nút đều yêu cầu người bấm ở cùng kênh thoại với bot.
+ */
+
+const { MessageFlags } = require('discord.js');
+
+const { t } = require('../locales');
+const NowPlayingUI = require('../services/ui/NowPlayingUI');
+const QueueUI = require('../services/ui/QueueUI');
+const { getState } = require('../services/player/PlayerState');
+const { respondEphemeral } = require('../utils/reply');
+const { isEphemeralMessage } = require('../utils/interactions');
+
+/** Bước thay đổi âm lượng mỗi lần bấm nút */
+const VOLUME_STEP = 10;
+
+/** Giới hạn âm lượng */
+const VOLUME_MIN = 1;
+const VOLUME_MAX = 200;
+
+/**
+ * Vẽ lại bảng Now Playing ngay trên tin nhắn chứa nút vừa bấm.
+ * @param {import('discord.js').ButtonInteraction} interaction
+ * @param {object} player - Kazagumo player
+ * @param {import('../services/player/PlayerState').PlayerState} state
+ */
+async function refreshPanel(interaction, player, state) {
+    const track = player.queue.current;
+    if (!track) return;
+
+    const { embed, components } = NowPlayingUI.create(player, track, state);
+    await interaction
+        .editReply({
+            content: state.panelNote || '',
+            embeds: [embed],
+            components
+        })
+        .catch(() => {});
+}
+
+/**
+ * Xử lý nút bấm trên bảng Now Playing.
+ * @param {import('discord.js').ButtonInteraction} interaction
+ * @param {object} ctx - Ngữ cảnh bot
+ * @param {string} customId
+ */
 async function handle(interaction, ctx, customId) {
     const player = ctx.manager.players.get(interaction.guild.id);
 
+    // Nút dừng luôn được phép thực thi ngay lập tức để giải phóng tài nguyên
+    if (customId === 'np_stop') {
+        if (player) {
+            await ctx.playerService.stop(player);
+        } else {
+            await ctx.playerService.forceCleanupVoice(interaction.guild.id);
+        }
+        const embed = NowPlayingUI.createStopped('stopped');
+        return interaction.update({ content: '', embeds: [embed], components: [] }).catch(() => {
+            return interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => {});
+        });
+    }
+
     // Player đã chết hoặc không tồn tại
     if (!player) {
-        if (customId === 'np_stop') {
-            await ctx.playerService.forceCleanupVoice(interaction.guild.id);
-            const embed = NowPlayingUI.createStopped('stopped');
-            return interaction.update({ content: '', embeds: [embed], components: [] }).catch(() => {
-                return interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => { });
-            });
-        }
         return respondEphemeral(interaction, t('common.noPlayer'));
     }
 
@@ -91,14 +146,9 @@ async function handle(interaction, ctx, customId) {
             return;
         }
 
-        case 'np_stop': {
-            await ctx.playerService.stop(player);
-            const embed = NowPlayingUI.createStopped('stopped');
-            await interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => { });
-            return;
-        }
-
         default:
             ctx.logger.debug(`Nút "${customId}" chưa được xử lý.`);
     }
 }
+
+module.exports = { handle, refreshPanel, prefix: 'np_' };

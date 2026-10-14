@@ -451,6 +451,23 @@ class PlayerService {
     }
 
     /**
+     * Dọn dẹp cưỡng chế kết nối thoại và player của một guild (dùng khi player đã chết hoặc không tồn tại).
+     * @param {string} guildId
+     */
+    async forceCleanupVoice(guildId) {
+        if (!guildId) return;
+        try { await this.manager.destroyPlayer(guildId); } catch (_) {}
+        try { await this.manager.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
+        try {
+            const guild = this.client.guilds.cache.get(guildId);
+            if (guild?.members?.me?.voice?.channelId) {
+                await guild.members.me.voice.disconnect();
+            }
+        } catch (_) {}
+        this.manager.players.delete(guildId);
+    }
+
+    /**
      * Phát lại bài vừa nghe gần nhất từ lịch sử.
      * Hỗ trợ cả lịch sử khôi phục từ đĩa (chưa có object track gốc → tìm lại theo URI).
      * @param {object} player - Kazagumo player
