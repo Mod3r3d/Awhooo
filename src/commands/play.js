@@ -35,10 +35,23 @@ async function execute(interaction, ctx) {
     const query = interaction.options.getString('query');
     const guildId = interaction.guild.id;
 
-    // Phản hồi ngay để người dùng không phải chờ lâu ở trạng thái "đang suy nghĩ..."
-    await interaction.editReply('🔍 Đang tìm kiếm và nạp bài hát...');
+    ctx.logger.info(`[play] Bắt đầu tìm kiếm query="${query}" cho user=${interaction.user.tag}`);
 
-    // Bảng Now Playing hiển thị riêng cho người gọi lệnh (ephemeral)
+    // Phản hồi ngay để người dùng biết bot đang tìm bài
+    await interaction.editReply('🔍 Đang tìm kiếm bài hát...');
+
+    // 1. Tìm kiếm bài hát trước
+    const result = await playerService.search(query, interaction.user);
+
+    if (!result.tracks.length) {
+        return interaction.editReply(t('commands.play.noResult'));
+    }
+
+    ctx.logger.info(`[play] Tìm thấy ${result.tracks.length} bài (type=${result.type}), đang kết nối voice channel ${voiceChannel.id}...`);
+
+    // 2. Có bài hát hợp lệ mới kết nối vào voice channel
+    await interaction.editReply(`🟢 Đã tìm thấy **${result.tracks.length}** bài. Đang kết nối vào kênh thoại...`);
+
     const player = await playerService.getOrCreatePlayer({
         guildId,
         textId: interaction.channelId,
@@ -46,13 +59,6 @@ async function execute(interaction, ctx) {
     });
 
     playerService.registerEphemeralContext(interaction, player);
-
-    const result = await playerService.search(query, interaction.user);
-
-    if (!result.tracks.length) {
-        playerService.releaseEphemeralContext(guildId);
-        return interaction.editReply(t('commands.play.noResult'));
-    }
 
     if (result.type === 'PLAYLIST') {
         const enqueued = await playerService.enqueue(player, result.tracks, { requesterId: interaction.user.id });

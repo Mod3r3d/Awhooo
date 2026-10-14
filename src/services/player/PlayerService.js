@@ -212,14 +212,19 @@ class PlayerService {
         }
 
         if (!player) {
-            player = await this.manager.createPlayer({
-                guildId,
-                textId,
-                voiceId,
-                volume: stored && Number.isFinite(stored.volume) ? stored.volume : DEFAULT_VOLUME,
-                deaf: true
-            });
-            this.log.info(`Đã tạo player mới cho guild ${guildId}.`);
+            this.log.info(`Đang kết nối voice channel ${voiceId} tại guild ${guildId}...`);
+            player = await this.withTimeout(
+                this.manager.createPlayer({
+                    guildId,
+                    textId,
+                    voiceId,
+                    volume: stored && Number.isFinite(stored.volume) ? stored.volume : DEFAULT_VOLUME,
+                    deaf: true
+                }),
+                15000,
+                'Kết nối kênh thoại (createPlayer)'
+            );
+            this.log.info(`Đã tạo player mới cho guild ${guildId} trên node "${player.shoukaku?.node?.name || 'unknown'}".`);
         } else {
             if (textId && player.textId !== textId) player.setTextChannel(textId);
             if (voiceId && player.voiceId !== voiceId) player.setVoiceChannel(voiceId);

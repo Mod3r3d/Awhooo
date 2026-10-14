@@ -175,7 +175,11 @@ manager = new Kazagumo(
         ],
         send: (guildId, payload) => {
             const guild = client.guilds.cache.get(guildId);
-            if (guild) guild.shard.send(payload);
+            if (guild && guild.shard) {
+                guild.shard.send(payload);
+            } else if (client.ws) {
+                client.ws.broadcast(payload);
+            }
         }
     },
     new Connectors.DiscordJS(client),
@@ -308,13 +312,17 @@ client.once(Events.ClientReady, async () => {
     try {
         log.info(`Đang đăng ký ${body.length} slash command...`);
 
-        // DEV_GUILD_ID giúp lệnh xuất hiện ngay lập tức khi phát triển
-        const route = process.env.DEV_GUILD_ID
-            ? Routes.applicationGuildCommands(client.user.id, process.env.DEV_GUILD_ID)
-            : Routes.applicationCommands(client.user.id);
+        if (process.env.DEV_GUILD_ID) {
+            try {
+                await rest.put(Routes.applicationGuildCommands(client.user.id, process.env.DEV_GUILD_ID), { body });
+                log.info(`Đã đăng ký ${body.length} slash command cho guild ${process.env.DEV_GUILD_ID}.`);
+            } catch (guildErr) {
+                log.warn('Không thể đăng ký guild slash commands:', guildErr.message);
+            }
+        }
 
-        await rest.put(route, { body });
-        log.info(`Đã đăng ký ${body.length} slash command${process.env.DEV_GUILD_ID ? ' cho guild phát triển' : ''}.`);
+        await rest.put(Routes.applicationCommands(client.user.id), { body });
+        log.info(`Đã đăng ký ${body.length} global slash command.`);
     } catch (err) {
         log.error('Lỗi đăng ký slash commands:', err);
     }
@@ -329,14 +337,17 @@ client.once(Events.ClientReady, async () => {
 client.on('interactionCreate', async (interaction) => {
     try {
         if (interaction.isChatInputCommand()) {
+            log.info(`[Command /${interaction.commandName}] bởi ${interaction.user.tag} (guild: ${interaction.guildId})`);
             return await commandHandler.dispatch(interaction);
         }
 
         if (interaction.isButton()) {
+            log.info(`[Button ${interaction.customId}] bởi ${interaction.user.tag} (guild: ${interaction.guildId})`);
             return await buttonHandler.dispatch(interaction);
         }
 
         if (interaction.isStringSelectMenu()) {
+            log.info(`[Select ${interaction.customId}] bởi ${interaction.user.tag} (guild: ${interaction.guildId})`);
             return await selectHandler.dispatch(interaction);
         }
     } catch (err) {
