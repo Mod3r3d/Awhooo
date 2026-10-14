@@ -20,7 +20,8 @@ const meta = {
  */
 async function execute(interaction, ctx) {
     const player = ctx.player || ctx.manager.players.get(interaction.guild.id);
-    const botChannelId = ctx.client.guilds?.cache?.get(interaction.guild.id)?.members?.me?.voice?.channelId || player?.voiceId;
+    const botChannelId =
+        ctx.client.guilds?.cache?.get(interaction.guild.id)?.members?.me?.voice?.channelId || player?.voiceId;
 
     if (botChannelId && ctx.voiceChannel?.id !== botChannelId) {
         return interaction.editReply(ctx.t('common.needSameVoice'));

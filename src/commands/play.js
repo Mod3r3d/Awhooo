@@ -47,7 +47,9 @@ async function execute(interaction, ctx) {
         return interaction.editReply(t('commands.play.noResult'));
     }
 
-    ctx.logger.info(`[play] Tìm thấy ${result.tracks.length} bài (type=${result.type}), đang kết nối voice channel ${voiceChannel.id}...`);
+    ctx.logger.info(
+        `[play] Tìm thấy ${result.tracks.length} bài (type=${result.type}), đang kết nối voice channel ${voiceChannel.id}...`
+    );
 
     // 2. Có bài hát hợp lệ mới kết nối vào voice channel
     await interaction.editReply(`🟢 Đã tìm thấy **${result.tracks.length}** bài. Đang kết nối vào kênh thoại...`);

@@ -22,6 +22,7 @@ const FilterService = require('../filters/FilterService');
 const AutoplayService = require('../autoplay/AutoplayService');
 const SearchCache = require('../cache/SearchCache');
 const { createLogger } = require('../logger');
+const { withTimeout } = require('../../utils/timeout');
 const {
     SEARCH_TIMEOUT_MS,
     PANEL_TICK_MS,
@@ -29,6 +30,9 @@ const {
     SEARCH_CACHE_MAX,
     SEARCH_CACHE_TTL_MS
 } = require('../../config/constants');
+
+/** Thởi gian chờ tối đa cho một lệnh Lavalink REST (ms) */
+const REST_TIMEOUT_MS = 15000;
 
 class PlayerService {
     /**
@@ -50,22 +54,6 @@ class PlayerService {
     // ==========================================================
 
     /**
-     * Bọc một promise với thời gian chờ tối đa.
-     * @template T
-     * @param {Promise<T>} promise
-     * @param {number} ms
-     * @param {string} desc - Mô tả dùng cho thông báo lỗi
-     * @returns {Promise<T>}
-     */
-    withTimeout(promise, ms, desc) {
-        let timer;
-        const timeout = new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`Quá thời gian (${ms / 1000}s): ${desc}`)), ms);
-        });
-        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-    }
-
-    /**
      * Lưu cài đặt + lịch sử của guild xuống đĩa.
      * @param {string} guildId
      * @param {import('./PlayerState').PlayerState} state
@@ -75,7 +63,7 @@ class PlayerService {
         if (!this.storage) return;
         const history = state.history.map((entry) => {
             const copy = { ...entry };
-            delete copy.raw; // Không lưu object track gốc để file dữ liệu gọn nhẹ
+            delete copy.raw;
             return copy;
         });
         this.storage.setGuild(guildId, {
@@ -105,7 +93,7 @@ class PlayerService {
     }
 
     /**
-     * Dựng lại kết quả tìm kiếm với người yêu cầu mới (không dùng lại instance cũ).
+     * Dựng lại kết quả tìm kiếm với ngưởi yêu cầu mới (không dùng lại instance cũ).
      * @param {{ type: string, playlistName?: string, raws: object[] }} raw
      * @param {object} requester
      * @returns {{ type: string, playlistName?: string, tracks: object[] }}
@@ -128,16 +116,15 @@ class PlayerService {
         const empty = { type: 'SEARCH', playlistName: undefined, raws: [] };
 
         try {
-            const result = await this.withTimeout(this.manager.search(query), SEARCH_TIMEOUT_MS, 'Kazagumo search');
+            const result = await withTimeout(this.manager.search(query), SEARCH_TIMEOUT_MS, 'Kazagumo search');
             if (result && result.tracks && result.tracks.length) return this.toRawResult(result);
         } catch (err) {
             this.log.warn(`Tìm kiếm thất bại cho "${query}":`, err.message);
         }
 
-        // Fallback: nếu là từ khoá (không phải URL) thì ép tìm trên YouTube
         if (!/^https?:\/\//i.test(query)) {
             try {
-                const forced = await this.withTimeout(
+                const forced = await withTimeout(
                     this.manager.search(`ytsearch:${query}`),
                     SEARCH_TIMEOUT_MS,
                     'ytsearch'
@@ -176,7 +163,7 @@ class PlayerService {
     // ==========================================================
 
     /**
-     * Lấy hoặc tạo player cho guild, đồng thời áp dụng cài đặt đã lưu.
+     * Lấy hoặc tạo player cho guild, đồng thởi áp dụng cài đặt đã lưu.
      * @param {{ guildId: string, textId: string, voiceId: string }} opts
      * @returns {Promise<object>} Kazagumo player
      */
@@ -184,7 +171,6 @@ class PlayerService {
         const state = getState(guildId);
         const stored = this.storage ? this.storage.getGuild(guildId) : null;
 
-        // Khôi phục cài đặt + lịch sử đã lưu (chỉ áp dụng một lần cho state mới)
         if (stored && !state.restored) {
             state.restored = true;
             if (stored.repeatMode) state.setRepeatMode(stored.repeatMode);
@@ -199,11 +185,9 @@ class PlayerService {
 
         let player = this.manager.players.get(guildId);
 
-        // Nếu player đã bị destroy hoặc mất kết nối voice, dọn dẹp để tạo mới
-        // Trong Shoukaku / Kazagumo: State = CONNECTING: 0, CONNECTED: 1, DISCONNECTING: 2, DISCONNECTED: 3
         if (player && ((player.state !== 1 && player.state !== 0) || !player.voiceId)) {
             try {
-                await player.destroy();
+                await withTimeout(player.destroy(), REST_TIMEOUT_MS, 'destroy stale player');
             } catch {
                 /* player đã chết */
             }
@@ -213,7 +197,7 @@ class PlayerService {
 
         if (!player) {
             this.log.info(`Đang kết nối voice channel ${voiceId} tại guild ${guildId}...`);
-            player = await this.withTimeout(
+            player = await withTimeout(
                 this.manager.createPlayer({
                     guildId,
                     textId,
@@ -224,7 +208,9 @@ class PlayerService {
                 15000,
                 'Kết nối kênh thoại (createPlayer)'
             );
-            this.log.info(`Đã tạo player mới cho guild ${guildId} trên node "${player.shoukaku?.node?.name || 'unknown'}".`);
+            this.log.info(
+                `Đã tạo player mới cho guild ${guildId} trên node "${player.shoukaku?.node?.name || 'unknown'}".`
+            );
         } else {
             if (textId && player.textId !== textId) player.setTextChannel(textId);
             if (voiceId && player.voiceId !== voiceId) player.setVoiceChannel(voiceId);
@@ -253,16 +239,24 @@ class PlayerService {
 
         const accepted = list.slice(0, check.allowed);
         if (top) {
-            // Chèn ngược để giữ đúng thứ tự ban đầu ở đầu hàng đợi
             for (let i = accepted.length - 1; i >= 0; i--) queueService.addTop(player, accepted[i]);
         } else {
             queueService.add(player, accepted);
         }
 
         if (!player.playing && !player.paused) {
-            await player.play().catch((err) => {
+            try {
+                await withTimeout(player.play(), REST_TIMEOUT_MS, 'player.play()');
+            } catch (err) {
                 this.log.error('Lỗi khi bắt đầu phát trong enqueue:', err);
-            });
+                return {
+                    ok: false,
+                    added: accepted.length,
+                    trimmed: list.length - accepted.length,
+                    error: 'common.systemError',
+                    vars: null
+                };
+            }
         }
 
         return {
@@ -279,7 +273,7 @@ class PlayerService {
      * @param {object} player - Kazagumo player
      * @param {object} track - Kazagumo track
      */
-    playSkip(player, track) {
+    async playSkip(player, track) {
         const state = getState(player.guildId);
         state.incrementGeneration();
 
@@ -287,7 +281,11 @@ class PlayerService {
         if (player.playing || player.paused) {
             player.skip();
         } else {
-            player.play();
+            try {
+                await withTimeout(player.play(), REST_TIMEOUT_MS, 'player.play() [playSkip]');
+            } catch (err) {
+                this.log.error('Lỗi playSkip play():', err);
+            }
         }
     }
 
@@ -323,7 +321,6 @@ class PlayerService {
 
         state.incrementGeneration();
 
-        // Xóa (position - 1) bài trước vị trí đó
         player.queue.splice(0, position - 1);
         player.skip();
         return { ok: true };
@@ -346,7 +343,7 @@ class PlayerService {
     }
 
     /**
-     * Nhảy tới một mốc thời gian trong bài đang phát.
+     * Nhảy tới một mốc thởi gian trong bài đang phát.
      * @param {object} player - Kazagumo player
      * @param {number} positionMs - Vị trí đích (ms)
      * @returns {Promise<{ ok: boolean, error?: string, vars?: object, position?: number }>}
@@ -363,12 +360,17 @@ class PlayerService {
             return { ok: false, error: 'commands.seek.outOfRange', vars: { duration: this.formatMs(duration) } };
         }
 
-        await player.seek(positionMs);
+        try {
+            await withTimeout(player.seek(positionMs), REST_TIMEOUT_MS, 'player.seek()');
+        } catch (err) {
+            this.log.error('Lỗi seek:', err);
+            return { ok: false, error: 'common.systemError' };
+        }
         return { ok: true, position: positionMs };
     }
 
     /**
-     * Định dạng nhanh mili-giây thành mm:ss (dùng cho thông báo lỗi).
+     * Định dạng nhanh mili-giây thành mm:ss.
      * @param {number} ms
      * @returns {string}
      */
@@ -387,15 +389,18 @@ class PlayerService {
      */
     async setFilter(player, name) {
         const state = getState(player.guildId);
-        const result = await FilterService.apply(player, name);
-
-        if (result.ok) {
-            state.filter = result.filter;
-            state.filterNeedsApply = false;
-            this.persistState(player.guildId, state, player.volume);
+        try {
+            const result = await withTimeout(FilterService.apply(player, name), REST_TIMEOUT_MS, 'FilterService.apply');
+            if (result.ok) {
+                state.filter = result.filter;
+                state.filterNeedsApply = false;
+                this.persistState(player.guildId, state, player.volume);
+            }
+            return result;
+        } catch (err) {
+            this.log.error('Lỗi áp dụng filter:', err);
+            return { ok: false, filter: state.filter, label: FilterService.getLabel(state.filter) };
         }
-
-        return result;
     }
 
     /**
@@ -413,6 +418,7 @@ class PlayerService {
 
     /**
      * Dừng phát, xoá hàng đợi và ngắt kết nối.
+     * persistState được gọi TRƯỚC destroy để giữ cài đặt.
      * @param {object} player - Kazagumo player
      */
     async stop(player) {
@@ -421,6 +427,9 @@ class PlayerService {
 
         const state = getState(guildId);
         state.incrementGeneration();
+
+        // LƯU CÀI ĐẶT TRƯỚC KHI DESTROY — nếu không onPlayerDestroy sẽ reset state
+        this.persistState(guildId, state, player.volume);
 
         await this.finalisePanels(state, 'stopped');
         state.clearPanels();
@@ -431,13 +440,13 @@ class PlayerService {
         }
 
         try {
-            await player.destroy();
+            await withTimeout(player.destroy(), REST_TIMEOUT_MS, 'player.destroy()');
         } catch {}
         try {
-            await this.manager.destroyPlayer(guildId);
+            await withTimeout(this.manager.destroyPlayer(guildId), REST_TIMEOUT_MS, 'destroyPlayer');
         } catch {}
         try {
-            await this.manager.shoukaku.leaveVoiceChannel(guildId);
+            await withTimeout(this.manager.shoukaku.leaveVoiceChannel(guildId), REST_TIMEOUT_MS, 'leaveVoiceChannel');
         } catch {}
         try {
             const guild = this.client.guilds.cache.get(guildId);
@@ -447,17 +456,24 @@ class PlayerService {
         } catch {}
 
         this.manager.players.delete(guildId);
-        this.persistState(guildId, state, player.volume);
     }
 
     /**
-     * Dọn dẹp cưỡng chế kết nối thoại và player của một guild (dùng khi player đã chết hoặc không tồn tại).
+     * Dọn dẹp cưỡng chế kết nối thoại và player của một guild.
      * @param {string} guildId
      */
     async forceCleanupVoice(guildId) {
         if (!guildId) return;
-        try { await this.manager.destroyPlayer(guildId); } catch (_) {}
-        try { await this.manager.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
+        try {
+            await withTimeout(this.manager.destroyPlayer(guildId), REST_TIMEOUT_MS, 'forceCleanup destroyPlayer');
+        } catch (_) {}
+        try {
+            await withTimeout(
+                this.manager.shoukaku.leaveVoiceChannel(guildId),
+                REST_TIMEOUT_MS,
+                'forceCleanup leaveVoiceChannel'
+            );
+        } catch (_) {}
         try {
             const guild = this.client.guilds.cache.get(guildId);
             if (guild?.members?.me?.voice?.channelId) {
@@ -469,7 +485,6 @@ class PlayerService {
 
     /**
      * Phát lại bài vừa nghe gần nhất từ lịch sử.
-     * Hỗ trợ cả lịch sử khôi phục từ đĩa (chưa có object track gốc → tìm lại theo URI).
      * @param {object} player - Kazagumo player
      * @returns {Promise<{ ok: boolean, track?: object, error?: string }>}
      */
@@ -484,7 +499,6 @@ class PlayerService {
 
         let rawTrack = prevTrack.raw;
         if (!rawTrack) {
-            // Lịch sử nạp từ đĩa: tìm lại bài hát theo URI hoặc tên
             const query = prevTrack.uri || `${prevTrack.title} ${prevTrack.author || ''}`.trim();
             const result = await this.search(query, player.queue.current?.requester || null);
             if (!result.tracks.length) {
@@ -499,7 +513,11 @@ class PlayerService {
         if (player.playing || player.paused) {
             player.skip();
         } else {
-            await player.play();
+            try {
+                await withTimeout(player.play(), REST_TIMEOUT_MS, 'player.play() [previous]');
+            } catch (err) {
+                this.log.error('Lỗi previous play():', err);
+            }
         }
 
         return { ok: true, track: rawTrack };
@@ -511,9 +529,8 @@ class PlayerService {
 
     /**
      * Đăng ký bối cảnh interaction làm "kênh" hiển thị bảng Now Playing dạng ephemeral.
-     * Gọi ngay sau khi command đã deferReply với cờ EPHEMERAL.
      * @param {import('discord.js').Interaction} interaction
-     * @param {object} player - Kazagumo player
+     * @param {object} player
      * @returns {import('./PlayerState').PlayerState}
      */
     registerEphemeralContext(interaction, player) {
@@ -527,21 +544,19 @@ class PlayerService {
     }
 
     /**
-     * Xoá bối cảnh ephemeral của guild (dùng khi gặp lỗi để bảng không bị ghi đè).
+     * Xoá bối cảnh ephemeral của guild.
      * @param {string} guildId
      */
     releaseEphemeralContext(guildId) {
         const state = getState(guildId);
         state.clearEphemeralContext();
-        // Chỉ dừng ticker nếu không còn bảng công khai nào cần cập nhật
         if (!state.publicPanel) state.clearNowPlaying();
     }
 
     /**
-     * Đăng ký bảng Now Playing công khai (do lệnh /nowplaying tạo) để ticker
-     * tiến trình tiếp tục cập nhật nó.
-     * @param {object} player - Kazagumo player
-     * @param {import('discord.js').Message} message - Tin nhắn công khai vừa gửi
+     * Đăng ký bảng Now Playing công khai để ticker tiếp tục cập nhật.
+     * @param {object} player
+     * @param {import('discord.js').Message} message
      */
     trackPublicPanel(player, message) {
         const state = getState(player.guildId);
@@ -552,15 +567,14 @@ class PlayerService {
 
     /**
      * Vẽ lại bảng Now Playing (ephemeral + public nếu có).
-     * @param {object} player - Kazagumo player
-     * @param {object} track - Track cần hiển thị
+     * @param {object} player
+     * @param {object} track
      * @param {import('./PlayerState').PlayerState} state
-     * @param {string|null} [note] - Ghi chú hiển thị phía trên bảng (chỉ bảng ephemeral)
+     * @param {string|null} [note]
      */
     async renderPanels(player, track, state, note = null) {
         if (!track) return;
 
-        // Ghi chú chỉ biến mất khi CHUYỂN BÀI, tránh bị xoá ngay sau khi hiện
         const trackKey = track.uri || track.title || String(track.identifier || '');
         const trackChanged = state.panelTrackKey !== trackKey;
         state.panelTrackKey = trackKey;
@@ -570,17 +584,14 @@ class PlayerService {
             state.panelNote = null;
         }
 
-        // Nút tự vô hiệu hoá nếu bảng bị bỏ quên quá lâu
         if (state.isPanelIdle()) state.panelDisabled = true;
         const disabled = state.panelDisabled;
 
         const { embed, components } = NowPlayingUI.create(player, track, state, { disabled });
 
-        // --- 1. Bảng ephemeral (chỉ người gọi lệnh thấy) ---
         const ctx = state.getEphemeralContext();
         if (ctx) {
             try {
-                // '@original' = tin nhắn trả lời gốc của interaction (chính là bảng này)
                 await ctx.webhook.editMessage('@original', {
                     content: state.panelNote || '',
                     embeds: [embed],
@@ -588,19 +599,16 @@ class PlayerService {
                 });
                 state.nowPlayingChannelId = ctx.channelId;
             } catch (err) {
-                // 10062: interaction hết hạn, 10008: tin nhắn đã bị xoá
                 this.log.warn('Bảng Now Playing ephemeral không còn chỉnh sửa được:', err.message);
                 state.clearEphemeralContext();
             }
         }
 
-        // --- 2. Bảng công khai trong kênh chat (chỉ có khi dùng /nowplaying) ---
         if (state.publicPanel) {
             try {
                 await state.publicPanel.message.edit({ embeds: [embed], components });
             } catch (err) {
                 if (err && err.code === 10008) {
-                    // Tin nhắn đã bị người dùng xoá
                     state.publicPanel = null;
                 }
             }
@@ -608,9 +616,8 @@ class PlayerService {
     }
 
     /**
-     * Vẽ lại mọi bảng Now Playing đang mở của guild (tiện dụng cho các lệnh
-     * thay đổi trạng thái như /pause, /volume, /repeat).
-     * @param {object} player - Kazagumo player
+     * Vẽ lại mọi bảng Now Playing đang mở của guild.
+     * @param {object} player
      */
     async refreshPanels(player) {
         const state = getState(player.guildId);
@@ -618,11 +625,11 @@ class PlayerService {
     }
 
     /**
-     * Vẽ lại bảng Now Playing ephemeral và khởi động ticker tiến trình.
-     * @param {object} player - Kazagumo player
-     * @param {object} track - Track cần hiển thị
-     * @param {string|null} [note] - Ghi chú hiển thị phía trên bảng
-     * @returns {Promise<boolean>} true nếu đã vẽ được bảng ephemeral
+     * Vẽ lại bảng Now Playing ephemeral và khởi động ticker.
+     * @param {object} player
+     * @param {object} track
+     * @param {string|null} [note]
+     * @returns {Promise<boolean>}
      */
     async renderEphemeralPanel(player, track, note = null) {
         const state = getState(player.guildId);
@@ -633,8 +640,7 @@ class PlayerService {
     }
 
     /**
-     * Chuyển mọi bảng đang mở sang trạng thái "đã kết thúc" và xoá nút bấm,
-     * tránh để lại nút chết khiến người dùng bấm vào bị lỗi.
+     * Chuyển mọi bảng đang mở sang trạng thái "đã kết thúc" và xoá nút bấm.
      * @param {import('./PlayerState').PlayerState} state
      * @param {'stopped'|'ended'} reason
      */
@@ -653,9 +659,8 @@ class PlayerService {
     }
 
     /**
-     * Khởi động (hoặc khởi động lại) ticker cập nhật thanh tiến trình.
-     * Chỉ chạy khi thực sự có bảng cần cập nhật.
-     * @param {object} player - Kazagumo player
+     * Khởi động ticker cập nhật thanh tiến trình.
+     * @param {object} player
      * @param {import('./PlayerState').PlayerState} state
      */
     startProgressTicker(player, state) {
@@ -667,7 +672,7 @@ class PlayerService {
 
         state.progressInterval = setInterval(async () => {
             try {
-                if (player.paused) return; // Đang tạm dừng thì giữ nguyên UI
+                if (player.paused) return;
                 const currentTrack = player.queue.current;
                 if (!currentTrack) {
                     state.clearNowPlaying();
@@ -682,28 +687,25 @@ class PlayerService {
             }
         }, PANEL_TICK_MS);
 
-        // Không giữ tiến trình sống chỉ vì ticker này
         if (typeof state.progressInterval.unref === 'function') state.progressInterval.unref();
     }
 
     // ==========================================================
-    // Vòng đời bài hát
+    // Vòng đởi bài hát
     // ==========================================================
 
     /**
      * Xử lý sự kiện khi bài hát bắt đầu phát.
-     * KHÔNG gửi tin nhắn vào kênh chat — chỉ cập nhật bảng Now Playing đang mở.
-     * @param {object} player - Kazagumo player
-     * @param {object} track - Track đang phát
+     * @param {object} player
+     * @param {object} track
      */
     async onTrackStart(player, track) {
         const state = getState(player.guildId);
         this.log.debug(`Bắt đầu phát "${track?.title}" tại guild ${player.guildId}.`);
 
-        // Áp dụng bộ lọc đã lưu (chỉ một lần sau khi khôi phục từ đĩa)
         if (state.filterNeedsApply && state.filter !== FilterService.default) {
             try {
-                await FilterService.apply(player, state.filter);
+                await withTimeout(FilterService.apply(player, state.filter), REST_TIMEOUT_MS, 'restore filter');
             } catch (err) {
                 this.log.warn('Không áp dụng được bộ lọc đã lưu:', err.message);
             }
@@ -721,9 +723,8 @@ class PlayerService {
 
     /**
      * Xử lý sự kiện khi bài hát kết thúc.
-     * Đưa bài vào history, lưu xuống đĩa, xử lý repeat mode.
-     * @param {object} player - Kazagumo player
-     * @param {object} track - Track vừa phát xong
+     * @param {object} player
+     * @param {object} track
      */
     onTrackEnd(player, track) {
         const state = getState(player.guildId);
@@ -745,7 +746,6 @@ class PlayerService {
             this.persistState(player.guildId, state, player.volume);
         }
 
-        // Xử lý Repeat mode
         if (state.repeatMode === 'track' && track) {
             queueService.addTop(player, track);
         } else if (state.repeatMode === 'queue' && track) {
@@ -754,8 +754,8 @@ class PlayerService {
     }
 
     /**
-     * Xử lý khi player hết bài trong queue: thử autoplay, nếu không thì dọn dẹp.
-     * @param {object} player - Kazagumo player
+     * Xử lý khi player hết bài trong queue.
+     * @param {object} player
      */
     async onPlayerEmpty(player) {
         const state = getState(player.guildId);
@@ -764,16 +764,16 @@ class PlayerService {
             const seed = state.history[0];
             if (seed) {
                 try {
-                    const next = await this.autoplay.findRelated(
-                        seed.raw || seed,
-                        state.getRecentKeys(),
-                        seed.raw?.requester || null
+                    const next = await withTimeout(
+                        this.autoplay.findRelated(seed.raw || seed, state.getRecentKeys(), seed.raw?.requester || null),
+                        20000,
+                        'autoplay.findRelated'
                     );
                     if (next) {
                         this.log.info(`Autoplay phát tiếp "${next.title}" tại guild ${player.guildId}.`);
                         state.incrementGeneration();
                         queueService.add(player, next);
-                        await player.play();
+                        await withTimeout(player.play(), REST_TIMEOUT_MS, 'player.play() [autoplay]');
                         return;
                     }
                 } catch (err) {

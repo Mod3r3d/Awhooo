@@ -7,6 +7,8 @@
  * mà Kazagumo đang quản lý. Payload đầy đủ giữ đúng âm lượng hiện tại.
  */
 
+const { withTimeout } = require('../../utils/timeout');
+
 /** Bộ đệm equalizer dùng cho các preset cần chỉnh dải tần */
 const BASSBOOST_EQ = [
     { band: 0, gain: 0.6 },
@@ -28,7 +30,6 @@ const BASSBOOST_EQ = [
 
 /**
  * Danh sách preset bộ lọc.
- * `payload` chỉ chứa các trường khác rỗng; các trường còn lại sẽ bị null hoá.
  */
 const PRESETS = {
     off: {
@@ -83,6 +84,9 @@ const PRESETS = {
 
 /** Trạng thái bộ lọc khi không áp dụng gì */
 const DEFAULT_FILTER = 'off';
+
+/** Thởi gian chờ Lavalink REST cho setFilters (ms) */
+const FILTER_TIMEOUT_MS = 15000;
 
 class FilterService {
     /**
@@ -172,7 +176,7 @@ class FilterService {
         }
 
         const payload = FilterService.buildPayload(normalised, player.volume || 100);
-        await player.setFilters(payload);
+        await withTimeout(player.setFilters(payload), FILTER_TIMEOUT_MS, 'player.setFilters');
 
         return { ok: true, filter: normalised, label: PRESETS[normalised].label };
     }
@@ -183,7 +187,11 @@ class FilterService {
      * @returns {Promise<{ ok: boolean, filter: string, label: string }>}
      */
     static async reset(player) {
-        await player.setFilters(FilterService.buildPayload(DEFAULT_FILTER, player.volume || 100));
+        await withTimeout(
+            player.setFilters(FilterService.buildPayload(DEFAULT_FILTER, player.volume || 100)),
+            FILTER_TIMEOUT_MS,
+            'player.setFilters [reset]'
+        );
         return { ok: true, filter: DEFAULT_FILTER, label: PRESETS[DEFAULT_FILTER].label };
     }
 

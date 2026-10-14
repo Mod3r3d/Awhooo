@@ -7,6 +7,7 @@
  */
 
 const { createLogger } = require('../logger');
+const { withTimeout } = require('../../utils/timeout');
 
 const log = createLogger('AutoplayService');
 
@@ -17,6 +18,9 @@ const QUERY_TEMPLATES = [
     (seed) => `${seed.title} ${seed.author}`
 ];
 
+/** Thởi gian chờ tìm kiếm autoplay (ms) */
+const AUTOPLAY_SEARCH_TIMEOUT_MS = 20000;
+
 /** Lấy khoá định danh duy nhất của một track */
 function trackKey(track) {
     if (!track) return '';
@@ -25,7 +29,6 @@ function trackKey(track) {
 
 /**
  * Chọn bài hát chưa từng phát trong danh sách kết quả.
- * Hàm thuần, tách riêng để dễ kiểm thử.
  * @param {object[]} tracks - Danh sách track ứng viên
  * @param {Set<string>} excludedKeys - Các khoá định danh cần loại trừ
  * @returns {object|null} Track được chọn hoặc null
@@ -52,7 +55,7 @@ class AutoplayService {
      * Tìm một bài hát liên quan tới bài vừa phát.
      * @param {object} seedTrack - Bài hát vừa phát xong
      * @param {Set<string>|string[]} excluded - Khoá định danh các bài cần tránh
-     * @param {object} [requester] - Người dùng được gán làm người yêu cầu
+     * @param {object} [requester] - Ngưởi dùng được gán làm ngưởi yêu cầu
      * @returns {Promise<object|null>} Track tìm được hoặc null
      */
     async findRelated(seedTrack, excluded, requester) {
@@ -66,7 +69,11 @@ class AutoplayService {
             if (!query || !query.trim()) continue;
 
             try {
-                const result = await this.manager.search(query, { requester });
+                const result = await withTimeout(
+                    this.manager.search(query, { requester }),
+                    AUTOPLAY_SEARCH_TIMEOUT_MS,
+                    `autoplay search: ${query}`
+                );
                 const picked = pickRelated(result?.tracks, excludedKeys);
                 if (picked) {
                     log.debug(`Autoplay chọn "${picked.title}" từ truy vấn "${query}"`);

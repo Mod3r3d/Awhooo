@@ -1,8 +1,8 @@
 /**
  * nowPlayingButtons — Xử lý toàn bộ nút trên bảng Now Playing (tiền tố `np_`).
  *
- * Bảng có thể là ephemeral (chỉ người gọi lệnh thấy) hoặc công khai (do
- * `/nowplaying` tạo). Mọi nút đều yêu cầu người bấm ở cùng kênh thoại với bot.
+ * Bảng có thể là ephemeral (chỉ ngưởi gọi lệnh thấy) hoặc công khai.
+ * Mọi nút đều yêu cầu ngưởi bấm ở cùng kênh thoại với bot (kể cả 🛑 Dừng).
  */
 
 const { MessageFlags } = require('discord.js');
@@ -13,6 +13,7 @@ const QueueUI = require('../services/ui/QueueUI');
 const { getState } = require('../services/player/PlayerState');
 const { respondEphemeral } = require('../utils/reply');
 const { isEphemeralMessage } = require('../utils/interactions');
+const { withTimeout } = require('../utils/timeout');
 
 /** Bước thay đổi âm lượng mỗi lần bấm nút */
 const VOLUME_STEP = 10;
@@ -21,10 +22,13 @@ const VOLUME_STEP = 10;
 const VOLUME_MIN = 1;
 const VOLUME_MAX = 200;
 
+/** Thởi gian chờ Lavalink REST cho các lệnh đơn giản (ms) */
+const REST_TIMEOUT_MS = 10000;
+
 /**
  * Vẽ lại bảng Now Playing ngay trên tin nhắn chứa nút vừa bấm.
  * @param {import('discord.js').ButtonInteraction} interaction
- * @param {object} player - Kazagumo player
+ * @param {object} player
  * @param {import('../services/player/PlayerState').PlayerState} state
  */
 async function refreshPanel(interaction, player, state) {
@@ -42,16 +46,32 @@ async function refreshPanel(interaction, player, state) {
 }
 
 /**
+ * Kiểm tra ngưởi dùng có ở cùng kênh thoại với bot không.
+ * @param {import('discord.js').ButtonInteraction} interaction
+ * @param {object} player
+ * @returns {boolean}
+ */
+function isInSameVoice(interaction, player) {
+    const memberVoice = interaction.member?.voice?.channel;
+    if (!memberVoice) return false;
+    if (player && player.voiceId && memberVoice.id !== player.voiceId) return false;
+    return true;
+}
+
+/**
  * Xử lý nút bấm trên bảng Now Playing.
  * @param {import('discord.js').ButtonInteraction} interaction
- * @param {object} ctx - Ngữ cảnh bot
+ * @param {object} ctx
  * @param {string} customId
  */
 async function handle(interaction, ctx, customId) {
     const player = ctx.manager.players.get(interaction.guild.id);
 
-    // Nút dừng luôn được phép thực thi ngay lập tức để giải phóng tài nguyên
+    // Nút dừng cũng phải kiểm tra kênh thoại để tránh bất kỳ ai ngoài phòng cũng dừng được
     if (customId === 'np_stop') {
+        if (!isInSameVoice(interaction, player)) {
+            return respondEphemeral(interaction, t('common.needSameVoice'));
+        }
         if (player) {
             await ctx.playerService.stop(player);
         } else {
@@ -68,8 +88,7 @@ async function handle(interaction, ctx, customId) {
         return respondEphemeral(interaction, t('common.noPlayer'));
     }
 
-    const memberVoice = interaction.member?.voice?.channel;
-    if (!memberVoice || (player.voiceId && memberVoice.id !== player.voiceId)) {
+    if (!isInSameVoice(interaction, player)) {
         return respondEphemeral(interaction, t('common.needSameVoice'));
     }
 
@@ -128,7 +147,11 @@ async function handle(interaction, ctx, customId) {
         case 'np_vol_up': {
             const delta = customId === 'np_vol_up' ? VOLUME_STEP : -VOLUME_STEP;
             const newVolume = Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, (player.volume || 100) + delta));
-            await player.setVolume(newVolume);
+            try {
+                await withTimeout(player.setVolume(newVolume), REST_TIMEOUT_MS, 'player.setVolume');
+            } catch (err) {
+                ctx.logger.warn('Lỗi setVolume từ nút:', err.message);
+            }
             ctx.playerService.persistState(interaction.guild.id, state, newVolume);
             await refreshPanel(interaction, player, state);
             return;

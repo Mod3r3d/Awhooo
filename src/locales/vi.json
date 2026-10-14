@@ -4,6 +4,8 @@
     "noPlaying": "❌ Không có bài nào đang phát.",
     "needVoice": "❌ Bạn cần vào kênh thoại trước!",
     "needSameVoice": "❌ Bạn cần ở cùng kênh thoại với bot!",
+    "noConnect": "❌ Bot không có quyền tham gia kênh thoại này (cần quyền **Connect**).",
+    "noSpeak": "❌ Bot không có quyền phát âm thanh trong kênh thoại này (cần quyền **Speak**).",
     "systemError": "❌ Lỗi hệ thống! Tôi đã ghi chi tiết lỗi vào log.",
     "lavalinkDown": "❌ Máy chủ phát nhạc (Lavalink) hiện đang kết nối lại. Vui lòng thử lại sau vài giây!",
     "loadError": "❌ Lỗi khi tải nhạc: {message}",

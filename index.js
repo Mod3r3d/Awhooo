@@ -56,7 +56,6 @@ const log = createLogger('Bootstrap');
 // ============================================================
 if (process.env.SENTRY_DSN) {
     try {
-        // Chỉ hoạt động nếu @sentry/node đã được cài; thiếu gói cũng không sao.
         const Sentry = require('@sentry/node');
         Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: 0.1 });
         attachErrorReporter((error, context) => Sentry.captureException(error, { extra: context }));
@@ -102,10 +101,11 @@ app.get('/health', (_req, res) => {
         : [];
 
     const connectedNodes = nodes.filter((node) => node.state === 'connected').length;
-    const healthy = connectedNodes > 0 || nodes.length === 0;
+    const degraded = connectedNodes === 0 && nodes.length > 0;
 
-    res.status(healthy ? 200 : 503).json({
-        status: healthy ? 'ok' : 'degraded',
+    // Luôn trả 200 để uptime monitor không restart bot lúc node Lavalink chưa kết nối
+    res.status(200).json({
+        status: degraded ? 'degraded' : 'ok',
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
         memory: {
             rssMb: Math.round(memory.rss / 1024 / 1024),
@@ -186,7 +186,7 @@ manager = new Kazagumo(
         moveOnDisconnect: true,
         resume: true,
         reconnectTries: 10,
-        restTimeout: 10000
+        restTimeout: 15
     }
 );
 
@@ -213,18 +213,18 @@ playerService = new PlayerService(client, manager, {
 voicePresence = new VoicePresenceService(client, manager, {
     idleMs: constants.VOICE_EMPTY_LEAVE_MS,
     onIdle: async (guildId) => {
-        log.info(`Không còn ai trong kênh thoại — rời phòng tại guild ${guildId}.`);
+        log.info(`Không còn ai trong kênh thoại — rồi phòng tại guild ${guildId}.`);
         const player = manager.players.get(guildId);
 
         if (player) {
-            const channel = client.channels.cache.get(player.textId);
             await playerService.stop(player);
-            if (channel && typeof channel.send === 'function') {
-                await channel.send('👋 Không còn ai trong kênh thoại nên tôi đã rời phòng.').catch(() => {});
-            }
         } else {
-            try { await manager.destroyPlayer(guildId); } catch (_) {}
-            try { await manager.shoukaku.leaveVoiceChannel(guildId); } catch (_) {}
+            try {
+                await manager.destroyPlayer(guildId);
+            } catch (_) {}
+            try {
+                await manager.shoukaku.leaveVoiceChannel(guildId);
+            } catch (_) {}
             try {
                 const guild = client.guilds.cache.get(guildId);
                 if (guild?.members?.me?.voice?.channelId) {
@@ -292,10 +292,7 @@ manager.on('playerDestroy', (player) => {
 
 manager.on('playerResolveError', async (player, track, message) => {
     log.error(`Không phân giải được bài hát "${track?.title}":`, message);
-    const channel = client.channels.cache.get(player.textId);
-    if (channel && typeof channel.send === 'function') {
-        channel.send(`⚠️ Không thể phát bài hát **${track?.title || 'hiện tại'}**: ${message || 'Lỗi nguồn phát'}. Đang chuyển bài...`).catch(() => {});
-    }
+    // Không gửi tin nhắn công khai để tránh spam — chỉ log
     if (player.queue.size > 0) {
         player.skip();
     } else {
@@ -305,10 +302,6 @@ manager.on('playerResolveError', async (player, track, message) => {
 
 manager.on('playerException', async (player, data) => {
     log.error(`Lỗi phát nhạc tại guild ${player.guildId}:`, data);
-    const channel = client.channels.cache.get(player.textId);
-    if (channel && typeof channel.send === 'function') {
-        channel.send('⚠️ Bài hát bị lỗi luồng phát hoặc bị chặn bản quyền. Đang tự động chuyển bài tiếp theo...').catch(() => {});
-    }
     if (player.queue.size > 0) {
         player.skip();
     } else {
@@ -318,10 +311,6 @@ manager.on('playerException', async (player, data) => {
 
 manager.on('playerStuck', async (player, track, thresholdMs) => {
     log.warn(`Bài hát "${track?.title}" bị nghẽn phát (${thresholdMs}ms) tại guild ${player.guildId}.`);
-    const channel = client.channels.cache.get(player.textId);
-    if (channel && typeof channel.send === 'function') {
-        channel.send(`⚠️ Bài hát **${track?.title || 'hiện tại'}** bị nghẽn luồng dữ liệu. Đang chuyển bài tiếp theo...`).catch(() => {});
-    }
     if (player.queue.size > 0) {
         player.skip();
     } else {
@@ -370,7 +359,9 @@ client.once(Events.ClientReady, async () => {
 client.on('interactionCreate', async (interaction) => {
     try {
         if (interaction.isChatInputCommand()) {
-            log.info(`[Command /${interaction.commandName}] bởi ${interaction.user.tag} (guild: ${interaction.guildId})`);
+            log.info(
+                `[Command /${interaction.commandName}] bởi ${interaction.user.tag} (guild: ${interaction.guildId})`
+            );
             return await commandHandler.dispatch(interaction);
         }
 

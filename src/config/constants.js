@@ -1,10 +1,10 @@
 /**
- * Constants — Hằng số cấu hình toàn cục, có thể ghi đè bằng biến môi trường.
+ * Constants — Hằng số cấu hình toàn cục, có thể ghi đè bằng biến môi trưởng.
  */
 
 /**
- * Đọc số nguyên từ biến môi trường, trả về giá trị mặc định nếu không hợp lệ.
- * @param {string} name - Tên biến môi trường
+ * Đọc số nguyên từ biến môi trưởng, trả về giá trị mặc định nếu không hợp lệ.
+ * @param {string} name - Tên biến môi trưởng
  * @param {number} fallback - Giá trị mặc định
  * @returns {number}
  */
@@ -16,7 +16,7 @@ function envInt(name, fallback) {
 }
 
 /**
- * Đọc giá trị boolean từ biến môi trường ("true"/"1"/"yes").
+ * Đọc giá trị boolean từ biến môi trưởng ("true"/"1"/"yes").
  * @param {string} name
  * @param {boolean} fallback
  * @returns {boolean}
@@ -31,7 +31,7 @@ module.exports = {
     // --- Giới hạn hàng đợi ---
     /** Số bài tối đa trong hàng đợi của một guild */
     MAX_QUEUE_SIZE: envInt('MAX_QUEUE_SIZE', 500),
-    /** Số bài tối đa một người dùng được thêm vào hàng đợi */
+    /** Số bài tối đa một ngưởi dùng được thêm vào hàng đợi */
     MAX_QUEUE_SIZE_PER_USER: envInt('MAX_QUEUE_SIZE_PER_USER', 100),
     /** Số bài tối đa nạp từ một playlist trong một lần */
     MAX_PLAYLIST_LOAD: envInt('MAX_PLAYLIST_LOAD', 100),
@@ -41,22 +41,22 @@ module.exports = {
     COMMAND_COOLDOWN_MS: envInt('COMMAND_COOLDOWN_MS', 3000),
 
     // --- Cache tìm kiếm ---
-    /** Thời gian sống của kết quả tìm kiếm trong cache (ms) */
+    /** Thởi gian sống của kết quả tìm kiếm trong cache (ms) */
     SEARCH_CACHE_TTL_MS: envInt('SEARCH_CACHE_TTL_MS', 5 * 60 * 1000),
     /** Số kết quả tìm kiếm tối đa lưu trong cache */
     SEARCH_CACHE_MAX: envInt('SEARCH_CACHE_MAX', 200),
 
     // --- Voice ---
     /**
-     * Thời gian chờ trước khi bot rời kênh thoại trống (ms).
-     * Hỗ trợ cả biến `AUTO_DISCONNECT_SECONDS` (giây) đã có trong .env.example.
+     * Thởi gian chờ trước khi bot rồi kênh thoại trống (ms).
+     * Mặc định 180 giây (3 phút), đồng bộ với .env.example.
      */
     VOICE_EMPTY_LEAVE_MS: process.env.AUTO_DISCONNECT_SECONDS
-        ? envInt('AUTO_DISCONNECT_SECONDS', 30) * 1000
-        : envInt('VOICE_EMPTY_LEAVE_MS', 30 * 1000),
+        ? envInt('AUTO_DISCONNECT_SECONDS', 180) * 1000
+        : envInt('VOICE_EMPTY_LEAVE_MS', 180 * 1000),
 
     // --- Giao diện Now Playing ---
-    /** Thời gian không tương tác trước khi vô hiệu hoá nút trên bảng (ms) */
+    /** Thởi gian không tương tác trước khi vô hiệu hoá nút trên bảng (ms) */
     PANEL_IDLE_TIMEOUT_MS: envInt('PANEL_IDLE_TIMEOUT_MS', 10 * 60 * 1000),
     /** Chu kỳ cập nhật thanh tiến trình (ms) */
     PANEL_TICK_MS: envInt('PANEL_TICK_MS', 10 * 1000),

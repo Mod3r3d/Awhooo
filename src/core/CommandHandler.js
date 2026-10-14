@@ -4,23 +4,8 @@
  * Nhờ `meta`, mỗi command không còn phải lặp lại các bước:
  * kiểm tra voice → kiểm tra player → deferReply → try/catch.
  *
- * Định dạng một module command:
- * ```js
- * module.exports = {
- *   definitions: [{ name: 'play', description: '...', options: [...] }],
- *   meta: {
- *     requiresVoice: true,   // người dùng phải ở trong kênh thoại
- *     requiresPlayer: true,  // phải có player trong guild
- *     requiresPlaying: true, // phải đang phát hoặc đang tạm dừng
- *     sameVoice: true,       // phải ở cùng kênh thoại với bot
- *     defer: 'ephemeral',    // 'ephemeral' | 'public' | false
- *     cooldown: 3000         // ms, mặc định lấy từ constants
- *   },
- *   execute: async (interaction, ctx) => { ... }   // 1 definition
- *   // hoặc
- *   handlers: { skip: fn, skipto: fn }             // nhiều definition
- * };
- * ```
+ * Cooldown được đặt SAU KHI lệnh thực thi thành công, tránh tiêu tốn cooldown
+ * khi lệnh thất bại do ngưởi dùng chưa vào voice hoặc lỗi hệ thống.
  */
 
 const { MessageFlags } = require('discord.js');
@@ -80,6 +65,7 @@ class CommandHandler {
 
     /**
      * Kiểm tra điều kiện tiên quyết dựa trên `meta`.
+     * Cooldown chỉ được KIỂM TRA (peek) ở đây — không đặt.
      * @param {import('discord.js').ChatInputCommandInteraction} interaction
      * @param {object} meta
      * @returns {Promise<{ ok: boolean, player?: object, voiceChannel?: object }>}
@@ -88,9 +74,9 @@ class CommandHandler {
         const ctx = this.ctx;
         const { t } = ctx;
 
-        // --- Cooldown ---
+        // --- Cooldown (chỉ kiểm tra, không đặt) ---
         if (meta.cooldown) {
-            const result = ctx.cooldown.check(`${interaction.user.id}:${interaction.commandName}`, meta.cooldown);
+            const result = ctx.cooldown.peek(`${interaction.user.id}:${interaction.commandName}`, meta.cooldown);
             if (!result.ok) {
                 await respondEphemeral(
                     interaction,
@@ -113,11 +99,11 @@ class CommandHandler {
                 const perms = voiceChannel.permissionsFor(ctx.client.user);
                 if (perms) {
                     if (!perms.has('Connect')) {
-                        await respondEphemeral(interaction, '❌ Bot không có quyền tham gia kênh thoại này (cần quyền **Connect**).');
+                        await respondEphemeral(interaction, t('common.noConnect'));
                         return { ok: false };
                     }
                     if (!perms.has('Speak')) {
-                        await respondEphemeral(interaction, '❌ Bot không có quyền phát âm thanh trong kênh thoại này (cần quyền **Speak**).');
+                        await respondEphemeral(interaction, t('common.noSpeak'));
                         return { ok: false };
                     }
                 }
@@ -175,6 +161,12 @@ class CommandHandler {
                 player: pre.player,
                 voiceChannel: pre.voiceChannel
             });
+
+            // Đặt cooldown CHỈ KHI lệnh thực sự thành công
+            if (meta.cooldown) {
+                ctx.cooldown.set(`${interaction.user.id}:${interaction.commandName}`, meta.cooldown);
+            }
+
             ctx.logger.info(`[Command /${interaction.commandName}] hoàn thành sau ${Date.now() - start}ms.`);
         } catch (err) {
             ctx.logger.error(`Lỗi khi chạy lệnh /${interaction.commandName} (${Date.now() - start}ms):`, err);

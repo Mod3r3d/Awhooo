@@ -1,9 +1,9 @@
 /**
- * VoicePresenceService — Tự động rời kênh thoại khi không còn ai nghe.
+ * VoicePresenceService — Tự động rồi kênh thoại khi không còn ai nghe.
  *
- * Trước đây bot nằm mãi trong kênh thoại sau khi mọi người rời đi, chiếm slot
+ * Trước đây bot nằm mãi trong kênh thoại sau khi mọi ngưởi rồi đi, chiếm slot
  * và giữ kết nối tới Lavalink. Service này theo dõi sự kiện `voiceStateUpdate`
- * và hẹn giờ rời phòng nếu kênh chỉ còn lại bot.
+ * và hẹn giờ rồi phòng nếu kênh chỉ còn lại bot.
  */
 
 const { createLogger } = require('../logger');
@@ -13,7 +13,6 @@ const log = createLogger('VoicePresenceService');
 
 /**
  * Đếm số thành viên KHÔNG phải bot trong một kênh thoại.
- * Hàm thuần, tách riêng để dễ kiểm thử.
  * @param {Iterable<{ user?: { bot?: boolean } }>} members
  * @returns {number}
  */
@@ -49,7 +48,7 @@ class VoicePresenceService {
             });
         };
         this.client.on('voiceStateUpdate', this.listener);
-        log.info(`Đã bật tính năng tự rời phòng sau ${Math.round(this.idleMs / 1000)}s khi kênh trống.`);
+        log.info(`Đã bật tính năng tự rồi phòng sau ${Math.round(this.idleMs / 1000)}s khi kênh trống.`);
     }
 
     /** Ngừng lắng nghe và xoá mọi timer đang chờ. */
@@ -71,14 +70,14 @@ class VoicePresenceService {
         const botId = this.client.user?.id;
         const player = this.manager?.players?.get(guild.id);
 
-        // Nếu sự kiện này chính là của bot và bot vừa rời khỏi kênh thoại
+        // Nếu sự kiện này chính là của bot và bot vừa rồi khỏi kênh thoại
+        // → chỉ huỷ timer, KHÔNG gọi onIdle (tránh thông báo sai ngữ cảnh và đệ quy)
         if (botId && newState.id === botId && !newState.channelId) {
             this.cancel(guild.id);
-            if (player) await this.onIdle(guild.id);
             return;
         }
 
-        // Lấy kênh thoại thực tế của bot từ Discord trước, chỉ fallback sang player/shoukaku khi cache chưa có
+        // Lấy kênh thoại thực tế của bot từ Discord trước
         const discordBotVoiceId =
             guild.voiceStates?.cache?.get(botId)?.channelId ?? guild.members?.me?.voice?.channelId;
         const botVoiceChannelId =
@@ -96,7 +95,7 @@ class VoicePresenceService {
             player.voiceId = botVoiceChannelId;
         }
 
-        // Đếm số người dùng (không phải bot) trong kênh thoại
+        // Đếm số ngưởi dùng (không phải bot) trong kênh thoại
         let humans = 0;
 
         if (guild.voiceStates?.cache?.size) {
@@ -129,20 +128,20 @@ class VoicePresenceService {
     }
 
     /**
-     * Hẹn giờ rời phòng cho một guild (bỏ qua nếu đã có timer).
+     * Hẹn giờ rồi phòng cho một guild.
      * @param {string} guildId
      */
     schedule(guildId) {
         if (this.timers.has(guildId)) return;
 
-        log.debug(`Kênh thoại của guild ${guildId} đã trống, hẹn rời sau ${Math.round(this.idleMs / 1000)}s.`);
+        log.debug(`Kênh thoại của guild ${guildId} đã trống, hẹn rồi sau ${Math.round(this.idleMs / 1000)}s.`);
 
         const timer = setTimeout(async () => {
             this.timers.delete(guildId);
             try {
                 await this.onIdle(guildId);
             } catch (err) {
-                log.error(`Không rời được kênh thoại của guild ${guildId}:`, err);
+                log.error(`Không rồi được kênh thoại của guild ${guildId}:`, err);
             }
         }, this.idleMs);
 
@@ -151,7 +150,7 @@ class VoicePresenceService {
     }
 
     /**
-     * Huỷ hẹn giờ rời phòng (khi có người quay lại).
+     * Huỷ hẹn giờ rồi phòng.
      * @param {string} guildId
      */
     cancel(guildId) {
@@ -159,11 +158,11 @@ class VoicePresenceService {
         if (timer) {
             clearTimeout(timer);
             this.timers.delete(guildId);
-            log.debug(`Có người quay lại kênh thoại guild ${guildId}, đã huỷ hẹn rời phòng.`);
+            log.debug(`Có ngưởi quay lại kênh thoại guild ${guildId}, đã huỷ hẹn rồi phòng.`);
         }
     }
 
-    /** Số guild đang trong trạng thái chờ rời phòng. */
+    /** Số guild đang trong trạng thái chờ rồi phòng. */
     get pendingCount() {
         return this.timers.size;
     }
