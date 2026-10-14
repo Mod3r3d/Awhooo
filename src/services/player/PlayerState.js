@@ -2,11 +2,11 @@
  * PlayerState — Trạng thái phát nhạc tập trung cho từng Guild.
  *
  * Lưu trữ: bài đang phát, lịch sử, chế độ lặp, generation guard,
- * và tham chiếu tin nhắn Now Playing để cập nhật.
+ * cài đặt guild (âm lượng, bộ lọc, autoplay) và tham chiếu các bảng Now Playing.
  */
 
-/** Số lượng bài hát tối đa lưu trong history */
-const MAX_HISTORY = 50;
+const { MAX_HISTORY, AUTOPLAY_DEFAULT, PANEL_IDLE_TIMEOUT_MS } = require('../../config/constants');
+const FilterService = require('../filters/FilterService');
 
 class PlayerState {
     /**
@@ -30,14 +30,49 @@ class PlayerState {
         /** Chế độ lặp: 'off' | 'track' | 'queue' */
         this.repeatMode = 'off';
 
-        /** ID tin nhắn Now Playing hiện tại (để edit thay vì gửi mới) */
-        this.nowPlayingMessageId = null;
+        /** Tên bộ lọc âm thanh đang áp dụng */
+        this.filter = FilterService.default;
 
-        /** ID kênh chứa tin nhắn Now Playing */
+        /** Bật/tắt tự động phát bài liên quan khi hết hàng đợi */
+        this.autoplay = AUTOPLAY_DEFAULT;
+
+        /** ID kênh chứa bảng Now Playing */
         this.nowPlayingChannelId = null;
 
         /** ID interval timer đang cập nhật progress bar (nếu có) */
         this.progressInterval = null;
+
+        /**
+         * Bối cảnh interaction dùng để gửi/cập nhật bảng Now Playing dạng EPHEMERAL
+         * (chỉ người gọi lệnh nhìn thấy). Token của interaction chỉ sống 15 phút
+         * nên phải lưu kèm thời điểm hết hạn.
+         * @type {{ webhook: object, userId: string, channelId: string, expiresAt: number }|null}
+         */
+        this.ephemeralContext = null;
+
+        /**
+         * Bảng Now Playing gửi CÔNG KHAI vào kênh chat (chỉ tạo bởi lệnh /nowplaying).
+         * @type {{ channelId: string, message: import('discord.js').Message }|null}
+         */
+        this.publicPanel = null;
+
+        /** Ghi chú hiển thị phía trên bảng ephemeral (VD: "🟢 Đã thêm: ...") */
+        this.panelNote = null;
+
+        /** Khoá nhận dạng bài hát của lần vẽ bảng gần nhất (để biết khi nào chuyển bài) */
+        this.panelTrackKey = null;
+
+        /** Thời điểm tương tác gần nhất với bảng Now Playing (để tự vô hiệu hoá nút) */
+        this.panelLastInteractionAt = Date.now();
+
+        /** Bảng đã bị vô hiệu hoá nút do quá hạn tương tác hay chưa */
+        this.panelDisabled = false;
+
+        /** Đã khôi phục cài đặt từ đĩa cho guild này chưa (chỉ làm một lần) */
+        this.restored = false;
+
+        /** Bộ lọc cần được áp dụng lại lên player (sau khi khôi phục từ đĩa) */
+        this.filterNeedsApply = false;
     }
 
     /**
@@ -66,7 +101,7 @@ class PlayerState {
         if (!track) return;
         this.history.unshift(track);
         if (this.history.length > MAX_HISTORY) {
-            this.history.pop();
+            this.history.length = MAX_HISTORY;
         }
     }
 
@@ -77,6 +112,19 @@ class PlayerState {
     popFromHistory() {
         if (this.history.length === 0) return null;
         return this.history.shift();
+    }
+
+    /**
+     * Danh sách khoá định danh các bài đã phát gần đây (dùng cho autoplay).
+     * @returns {Set<string>}
+     */
+    getRecentKeys() {
+        const keys = new Set();
+        for (const entry of this.history) {
+            const key = entry.identifier || entry.uri || `${entry.title}|${entry.author}`;
+            if (key) keys.add(key);
+        }
+        return keys;
     }
 
     /**
@@ -101,6 +149,53 @@ class PlayerState {
     }
 
     /**
+     * Lưu bối cảnh interaction để gửi/cập nhật bảng Now Playing dạng ephemeral.
+     * @param {{ webhook: object, userId: string, channelId: string }} ctx
+     */
+    setEphemeralContext({ webhook, userId, channelId }) {
+        this.ephemeralContext = {
+            webhook,
+            userId,
+            channelId,
+            // Token interaction sống 15 phút → chừa 1 phút an toàn
+            expiresAt: Date.now() + 14 * 60 * 1000
+        };
+        this.touchPanel();
+    }
+
+    /**
+     * Lấy bối cảnh ephemeral nếu vẫn còn hiệu lực (tự dọn nếu đã hết hạn).
+     * @returns {{ webhook: object, userId: string, channelId: string, expiresAt: number }|null}
+     */
+    getEphemeralContext() {
+        if (!this.ephemeralContext) return null;
+        if (Date.now() >= this.ephemeralContext.expiresAt) {
+            this.ephemeralContext = null;
+            return null;
+        }
+        return this.ephemeralContext;
+    }
+
+    /** Xoá bối cảnh ephemeral (token hết hạn hoặc bảng đã bị xoá). */
+    clearEphemeralContext() {
+        this.ephemeralContext = null;
+    }
+
+    /** Ghi nhận có tương tác với bảng Now Playing (làm mới đồng hồ đếm hết hạn nút). */
+    touchPanel() {
+        this.panelLastInteractionAt = Date.now();
+        this.panelDisabled = false;
+    }
+
+    /**
+     * Bảng đã quá hạn tương tác chưa?
+     * @returns {boolean}
+     */
+    isPanelIdle() {
+        return Date.now() - this.panelLastInteractionAt >= PANEL_IDLE_TIMEOUT_MS;
+    }
+
+    /**
      * Dọn dẹp interval và reset tin nhắn Now Playing.
      */
     clearNowPlaying() {
@@ -108,18 +203,33 @@ class PlayerState {
             clearInterval(this.progressInterval);
             this.progressInterval = null;
         }
-        this.nowPlayingMessageId = null;
         this.nowPlayingChannelId = null;
+    }
+
+    /**
+     * Dừng ticker và xoá mọi tham chiếu bảng Now Playing (cả ephemeral lẫn public).
+     */
+    clearPanels() {
+        this.clearNowPlaying();
+        this.clearEphemeralContext();
+        this.publicPanel = null;
+        this.panelNote = null;
+        this.panelTrackKey = null;
+        this.panelDisabled = false;
     }
 
     /**
      * Reset toàn bộ state về mặc định.
      */
     reset() {
-        this.clearNowPlaying();
+        this.clearPanels();
         this.playbackGeneration = 0;
         this.history = [];
         this.repeatMode = 'off';
+        this.filter = FilterService.default;
+        this.autoplay = AUTOPLAY_DEFAULT;
+        this.restored = false;
+        this.filterNeedsApply = false;
     }
 }
 
@@ -152,9 +262,18 @@ function removeState(guildId) {
     }
 }
 
+/**
+ * Số guild đang có state (dùng cho endpoint /health).
+ * @returns {number}
+ */
+function getStateCount() {
+    return stateMap.size;
+}
+
 module.exports = {
     PlayerState,
     getState,
     removeState,
+    getStateCount,
     MAX_HISTORY
 };

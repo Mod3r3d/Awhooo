@@ -5,7 +5,7 @@
  * Tất cả đi qua service này để đảm bảo nhất quán và dễ mở rộng.
  */
 
-const Track = require('../../models/Track');
+const { MAX_QUEUE_SIZE, MAX_QUEUE_SIZE_PER_USER, MAX_PLAYLIST_LOAD } = require('../../config/constants');
 
 class QueueService {
     /**
@@ -129,6 +129,54 @@ class QueueService {
      */
     size(player) {
         return player.queue.length;
+    }
+
+    /**
+     * Đếm số bài trong hàng đợi do một người dùng thêm vào.
+     * @param {object} player - Kazagumo player
+     * @param {string} requesterId
+     * @returns {number}
+     */
+    countByRequester(player, requesterId) {
+        if (!requesterId) return 0;
+        return Array.from(player.queue).filter((track) => {
+            const id = track.requesterId || (track.requester && track.requester.id);
+            return id === requesterId;
+        }).length;
+    }
+
+    /**
+     * Kiểm tra còn chỗ để thêm bài hay không (theo giới hạn guild và theo người dùng).
+     * @param {object} player - Kazagumo player
+     * @param {number} count - Số bài muốn thêm
+     * @param {string} [requesterId] - ID người yêu cầu (bỏ qua nếu không cần giới hạn theo người)
+     * @returns {{ ok: boolean, allowed: number, error?: 'queueFull'|'userQueueFull', vars?: object }}
+     */
+    canAdd(player, count, requesterId) {
+        const currentSize = player.queue.length;
+        const guildSpace = MAX_QUEUE_SIZE - currentSize;
+
+        if (guildSpace <= 0) {
+            return { ok: false, allowed: 0, error: 'queueFull', vars: { max: MAX_QUEUE_SIZE } };
+        }
+
+        let allowed = Math.min(count, guildSpace, MAX_PLAYLIST_LOAD);
+
+        if (requesterId) {
+            const userCount = this.countByRequester(player, requesterId);
+            const userSpace = MAX_QUEUE_SIZE_PER_USER - userCount;
+            if (userSpace <= 0) {
+                return {
+                    ok: false,
+                    allowed: 0,
+                    error: 'userQueueFull',
+                    vars: { count: userCount, max: MAX_QUEUE_SIZE_PER_USER }
+                };
+            }
+            allowed = Math.min(allowed, userSpace);
+        }
+
+        return { ok: allowed > 0, allowed };
     }
 
     /**

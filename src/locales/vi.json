@@ -1,0 +1,202 @@
+{
+  "common": {
+    "noPlayer": "❌ Không có kết nối âm thanh.",
+    "noPlaying": "❌ Không có bài nào đang phát.",
+    "needVoice": "❌ Bạn cần vào kênh thoại trước!",
+    "needSameVoice": "❌ Bạn cần ở cùng kênh thoại với bot!",
+    "systemError": "❌ Lỗi hệ thống! Tôi đã ghi chi tiết lỗi vào log.",
+    "lavalinkDown": "❌ Máy chủ phát nhạc (Lavalink) hiện đang kết nối lại. Vui lòng thử lại sau vài giây!",
+    "loadError": "❌ Lỗi khi tải nhạc: {message}",
+    "cooldown": "⏳ Chậm đã! Vui lòng thử lại sau **{seconds}s**.",
+    "queueFull": "❌ Hàng đợi đã đầy (**{max}** bài). Vui lòng chờ hoặc xoá bớt.",
+    "userQueueFull": "❌ Bạn đã thêm **{count}** bài vào hàng đợi (giới hạn **{max}** bài mỗi người).",
+    "playlistTrimmed": "ℹ️ Playlist có **{total}** bài, chỉ nạp **{loaded}** bài đầu tiên.",
+    "onlyRequester": "❌ Chỉ **{name}** (người yêu cầu bài hát) mới điều khiển được bảng này.",
+    "panelExpired": "⌛ Bảng điều khiển đã hết hạn. Dùng `/nowplaying` để mở lại."
+  },
+  "commands": {
+    "play": {
+      "description": "Phát nhạc từ YouTube, Spotify hoặc từ khóa",
+      "queryDescription": "Tên bài hát hoặc URL (YouTube, Spotify, SoundCloud...)",
+      "noResult": "❌ Không tìm thấy bài hát hoặc danh sách phát trống!",
+      "added": "🟢 Đã thêm: **{title}**",
+      "playlistAdded": "🟢 Đã nạp Playlist **{name}** gồm **{count}** bài hát!"
+    },
+    "playtop": {
+      "description": "Thêm bài hát lên đầu hàng đợi (phát kế tiếp)",
+      "queryDescription": "Tên bài hát hoặc URL",
+      "noResult": "❌ Không tìm thấy bài hát!",
+      "added": "📌 Đã chèn lên đầu hàng đợi: **{title}**"
+    },
+    "playskip": {
+      "description": "Bỏ qua bài hiện tại và phát ngay bài mới",
+      "queryDescription": "Tên bài hát hoặc URL",
+      "noResult": "❌ Không tìm thấy bài hát!",
+      "playing": "⏭️ Đang phát ngay: **{title}**"
+    },
+    "search": {
+      "description": "Tìm kiếm và chọn bài hát từ danh sách kết quả",
+      "queryDescription": "Từ khóa tìm kiếm",
+      "prompt": "🔎 Kết quả cho **{query}** — chọn bài bạn muốn phát:",
+      "placeholder": "Chọn một bài hát...",
+      "noResult": "❌ Không tìm thấy kết quả nào cho **{query}**.",
+      "added": "🟢 Đã thêm: **{title}**",
+      "expired": "⌛ Menu chọn bài đã hết hạn.",
+      "cancelled": "⏹️ Đã huỷ chọn bài."
+    },
+    "skip": {
+      "description": "Bỏ qua bài hiện tại",
+      "skipped": "⏭️ Đã bỏ qua bài hiện tại!",
+      "nothing": "❌ Không có bài nào để bỏ qua."
+    },
+    "skipto": {
+      "description": "Nhảy đến vị trí bài hát trong hàng đợi",
+      "indexDescription": "Nhập số thứ tự bài hát (VD: 5)",
+      "invalidPosition": "❌ Vị trí không hợp lệ. Hàng đợi hiện có **{count}** bài.",
+      "done": "⏭️ Đã nhảy thẳng đến bài số **{position}**!"
+    },
+    "pause": {
+      "description": "Tạm dừng phát nhạc",
+      "done": "⏸️ Đã tạm dừng phát nhạc."
+    },
+    "resume": {
+      "description": "Tiếp tục phát bài hát",
+      "done": "▶️ Đã tiếp tục phát nhạc."
+    },
+    "stop": {
+      "description": "Dừng nhạc và thoát khỏi kênh thoại",
+      "done": "🛑 Đã dừng nhạc và xóa toàn bộ hàng đợi."
+    },
+    "queue": {
+      "description": "Xem và quản lý danh sách chờ",
+      "pageDescription": "Số trang muốn xem (mặc định: 1)",
+      "removeDescription": "Xóa bài hát tại vị trí này (VD: 3)",
+      "moveFromDescription": "Di chuyển bài: vị trí nguồn",
+      "moveToDescription": "Di chuyển bài: vị trí đích",
+      "clearDescription": "Xóa toàn bộ hàng đợi (giữ bài đang phát)",
+      "empty": "📭 Không có bài nào trong hàng đợi.",
+      "cleared": "🗑️ Đã xóa **{count}** bài khỏi hàng đợi. Bài đang phát không bị ảnh hưởng.",
+      "removed": "🗑️ Đã xóa: **{title}** (vị trí {position})",
+      "invalidPosition": "❌ Vị trí **{position}** không hợp lệ.",
+      "moved": "↕️ Đã di chuyển bài từ vị trí **{from}** đến **{to}**"
+    },
+    "repeat": {
+      "description": "Đổi chế độ lặp (Off / Track / Queue)",
+      "modeDescription": "Chế độ lặp mong muốn",
+      "choiceOff": "➡️ Tắt lặp",
+      "choiceTrack": "🔂 Lặp bài hiện tại",
+      "choiceQueue": "🔁 Lặp danh sách",
+      "modeOff": "Tắt",
+      "modeTrack": "Lặp bài hiện tại",
+      "modeQueue": "Lặp danh sách",
+      "changed": "🔁 Chế độ lặp: **{mode}**"
+    },
+    "shuffle": {
+      "description": "Xáo trộn ngẫu nhiên thứ tự các bài hát trong hàng đợi",
+      "mineDescription": "Chỉ xáo trộn bài do bạn thêm (mặc định: toàn bộ)",
+      "done": "🔀 Đã xáo trộn **{count}** bài!",
+      "doneMine": "🔀 Đã xáo trộn **{count}** bài do bạn thêm!",
+      "needMore": "❌ Cần ít nhất 2 bài để xáo trộn."
+    },
+    "history": {
+      "description": "Xem lịch sử các bài hát đã phát trong máy chủ",
+      "empty": "📭 Lịch sử trống — chưa có bài nào được phát.",
+      "title": "📜 Lịch sử phát nhạc",
+      "footer": "Hiển thị {shown}/{total} bài gần nhất │ Dùng /previous để phát lại bài gần nhất"
+    },
+    "previous": {
+      "description": "Phát lại bài hát vừa nghe gần nhất",
+      "empty": "❌ Lịch sử trống, không có bài nào để phát lại.",
+      "playing": "⏮️ Đang phát lại: **{title}**"
+    },
+    "volume": {
+      "description": "Xem hoặc điều chỉnh âm lượng phát nhạc (1 - 200%)",
+      "levelDescription": "Mức âm lượng (từ 1 đến 200%)",
+      "current": "🔊 Âm lượng hiện tại: **{level}%**",
+      "changed": "🔊 Đã chỉnh âm lượng thành: **{level}%**"
+    },
+    "nowplaying": {
+      "description": "Gửi công khai bảng điều khiển bài hát đang phát vào kênh chat",
+      "none": "❌ Không có bài hát nào đang phát!"
+    },
+    "filter": {
+      "description": "Bật/tắt bộ lọc âm thanh (bassboost, nightcore, 8D...)",
+      "nameDescription": "Tên bộ lọc muốn áp dụng",
+      "applied": "🎛️ Đã bật bộ lọc **{name}**.",
+      "disabled": "🎛️ Đã tắt toàn bộ bộ lọc.",
+      "current": "🎛️ Bộ lọc hiện tại: **{name}**",
+      "invalid": "❌ Bộ lọc **{name}** không tồn tại.",
+      "list": "🎛️ Bộ lọc khả dụng: {list}"
+    },
+    "seek": {
+      "description": "Nhảy tới một mốc thời gian trong bài hát",
+      "timeDescription": "Mốc thời gian, ví dụ 1:30 hoặc 90 (giây)",
+      "invalidTime": "❌ Thời gian không hợp lệ. Ví dụ hợp lệ: `1:30`, `90`, `1h2m`.",
+      "outOfRange": "❌ Vị trí vượt quá thời lượng bài hát (**{duration}**).",
+      "live": "❌ Không thể tua một luồng phát trực tiếp.",
+      "done": "⏩ Đã nhảy tới **{position}**."
+    },
+    "forward": {
+      "description": "Tua tới trước một số giây",
+      "secondsDescription": "Số giây muốn tua tới (mặc định 10)",
+      "done": "⏩ Đã tua tới **{position}**."
+    },
+    "rewind": {
+      "description": "Tua lại một số giây",
+      "secondsDescription": "Số giây muốn tua lại (mặc định 10)",
+      "done": "⏪ Đã tua lại **{position}**."
+    },
+    "autoplay": {
+      "description": "Bật/tắt tự động phát bài hát liên quan khi hết hàng đợi",
+      "modeDescription": "Bật hay tắt",
+      "choiceOn": "♾️ Bật",
+      "choiceOff": "⏹️ Tắt",
+      "enabled": "♾️ Đã bật tự động phát bài liên quan.",
+      "disabled": "⏹️ Đã tắt tự động phát.",
+      "currentOn": "♾️ Tự động phát đang **bật**.",
+      "currentOff": "♾️ Tự động phát đang **tắt**."
+    }
+  },
+  "ui": {
+    "nowPlaying": {
+      "playing": "🎵 Đang phát",
+      "paused": "⏸️ Đã tạm dừng",
+      "nothing": "🔇 Không có bài nào đang phát",
+      "unknown": "Unknown",
+      "artist": "🎤 Nghệ sĩ",
+      "requester": "👤 Yêu cầu bởi",
+      "status": "⚙️ Trạng thái",
+      "repeatOff": "Tắt",
+      "repeatTrack": "Lặp bài",
+      "repeatQueue": "Lặp DS",
+      "nextUp": "⏭ Kế tiếp: {title} [{duration}] │ 📜 {count} bài trong hàng đợi",
+      "queueEmpty": "📭 Hàng đợi trống",
+      "live": "🔴 LIVE",
+      "filterOff": "Không",
+      "autoplayOn": "♾️ Bật",
+      "autoplayOff": "♾️ Tắt"
+    },
+    "queue": {
+      "emptyTitle": "📭 Hàng đợi trống",
+      "emptyHint": "Sử dụng `/play` để thêm bài hát!",
+      "title": "🎵 Danh Sách Chờ",
+      "nowPlaying": "▶️ Đang phát",
+      "listName": "📋 Hàng đợi ({count} bài)",
+      "footer": "Trang {page}/{totalPages} │ ⏱ Tổng thời lượng: {duration} │ 📦 {count} bài trong hàng đợi",
+      "notAvailable": "N/A"
+    }
+  },
+  "buttons": {
+    "previous": "Bài trước",
+    "pause": "Tạm dừng",
+    "resume": "Tiếp tục",
+    "skip": "Bỏ qua",
+    "shuffle": "Xáo trộn",
+    "volumeDown": "Giảm âm lượng",
+    "volumeUp": "Tăng âm lượng",
+    "queue": "Hàng đợi",
+    "stop": "Dừng",
+    "filter": "Bộ lọc",
+    "autoplay": "Tự động phát"
+  }
+}

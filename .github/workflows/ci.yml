@@ -1,0 +1,54 @@
+name: CI
+
+on:
+    push:
+        branches: [main, master]
+    pull_request:
+        branches: [main, master]
+    workflow_dispatch:
+
+jobs:
+    # ----------------------------------------------------------
+    # Lint + unit test trên nhiều phiên bản Node
+    # ----------------------------------------------------------
+    test:
+        name: Lint & Test (Node ${{ matrix.node-version }})
+        runs-on: ubuntu-latest
+
+        strategy:
+            fail-fast: false
+            matrix:
+                node-version: ['18.x', '20.x', '22.x']
+
+        steps:
+            - name: Checkout mã nguồn
+              uses: actions/checkout@v4
+
+            - name: Cài Node.js ${{ matrix.node-version }}
+              uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ matrix.node-version }}
+                  cache: npm
+
+            - name: Cài dependencies
+              run: npm ci
+
+            - name: Kiểm tra lint
+              run: npm run lint
+
+            - name: Chạy unit test
+              run: npm test
+
+    # ----------------------------------------------------------
+    # Đảm bảo Docker image build được
+    # ----------------------------------------------------------
+    docker:
+        name: Build Docker image
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout mã nguồn
+              uses: actions/checkout@v4
+
+            - name: Build image
+              run: docker build -t discord-music-bot:ci .

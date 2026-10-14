@@ -1,359 +1,414 @@
 /**
  * Discord Music Bot — Entry Point
  *
- * Kiến trúc mới: index.js chỉ làm 3 việc:
- * 1. Khởi động HTTP health server (cho Render)
- * 2. Khởi tạo Discord Client + Kazagumo/Shoukaku + PlayerService
- * 3. Đăng ký slash commands và điều hướng interaction/button/event
+ * index.js chỉ làm 4 việc:
+ * 1. Khởi động HTTP health server (cho Render / Railway / uptime monitor)
+ * 2. Khởi tạo Discord Client + Kazagumo/Shoukaku + các service
+ * 3. Đăng ký slash command và gắn router tương tác
+ * 4. Xử lý tắt máy an toàn (graceful shutdown)
+ *
+ * Toàn bộ logic nghiệp vụ nằm trong `src/` — xem `src/core/` cho phần định tuyến.
  */
 
 require('dotenv').config();
+
+const path = require('node:path');
 const { Client, GatewayIntentBits, REST, Routes, Events } = require('discord.js');
 const { Kazagumo } = require('kazagumo');
 const KazagumoSpotify = require('kazagumo-spotify');
 const { Connectors } = require('shoukaku');
 const express = require('express');
 
-// --- Import modules ---
+// --- Cấu hình & hạ tầng ---
 const { Nodes } = require('./src/config/lavalink');
-const PlayerService = require('./src/services/player/PlayerService');
-const { getState } = require('./src/services/player/PlayerState');
-const QueueUI = require('./src/services/ui/QueueUI');
-const queueService = require('./src/services/queue/QueueService');
+const constants = require('./src/config/constants');
+const { createLogger, attachErrorReporter } = require('./src/services/logger');
 
-// --- Import commands ---
-const playCmd = require('./src/commands/play');
-const playtopCmd = require('./src/commands/playtop');
-const playskipCmd = require('./src/commands/playskip');
-const skipCmd = require('./src/commands/skip');
-const pauseCmd = require('./src/commands/pause');
-const resumeCmd = require('./src/commands/resume');
-const stopCmd = require('./src/commands/stop');
-const queueCmd = require('./src/commands/queue');
-const repeatCmd = require('./src/commands/repeat');
-const shuffleCmd = require('./src/commands/shuffle');
-const historyCmd = require('./src/commands/history');
-const previousCmd = require('./src/commands/previous');
-const volumeCmd = require('./src/commands/volume');
-const nowplayingCmd = require('./src/commands/nowplaying');
+// --- Services ---
+const PlayerService = require('./src/services/player/PlayerService');
+const { getStateCount } = require('./src/services/player/PlayerState');
+const StorageService = require('./src/services/storage/StorageService');
+const VoicePresenceService = require('./src/services/voice/VoicePresenceService');
+const SearchCache = require('./src/services/cache/SearchCache');
+const AutoplayService = require('./src/services/autoplay/AutoplayService');
+const cooldown = require('./src/services/cooldown/CooldownService');
+const SearchUI = require('./src/services/ui/SearchUI');
+
+// --- Lớp định tuyến ---
+const { createContext } = require('./src/core/context');
+const CommandHandler = require('./src/core/CommandHandler');
+const ButtonHandler = require('./src/core/ButtonHandler');
+const SelectHandler = require('./src/core/SelectHandler');
+
+// --- Tương tác ---
+const nowPlayingButtons = require('./src/interactions/nowPlayingButtons');
+const queueButtons = require('./src/interactions/queueButtons');
+const filterSelect = require('./src/interactions/filterSelect');
+const searchSelect = require('./src/interactions/searchSelect');
+
+// --- Danh sách lệnh ---
+const commandModules = require('./src/commands');
+
+const log = createLogger('Bootstrap');
 
 // ============================================================
-// 1. HTTP Health Server (độc lập, khởi động ngay lập tức)
+// 0. Thu thập lỗi bên ngoài (tùy chọn — Sentry)
+// ============================================================
+if (process.env.SENTRY_DSN) {
+    try {
+        // Chỉ hoạt động nếu @sentry/node đã được cài; thiếu gói cũng không sao.
+        const Sentry = require('@sentry/node');
+        Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: 0.1 });
+        attachErrorReporter((error, context) => Sentry.captureException(error, { extra: context }));
+        log.info('Đã bật Sentry để thu thập lỗi.');
+    } catch {
+        log.warn('Có SENTRY_DSN nhưng chưa cài @sentry/node — bỏ qua thu thập lỗi.');
+    }
+}
+
+// ============================================================
+// 1. HTTP Health Server
 // ============================================================
 const app = express();
+const startedAt = Date.now();
+
+/** Chuyển mã trạng thái node Lavalink thành tên dễ đọc */
+const NODE_STATES = {
+    0: 'connecting',
+    1: 'nearly',
+    2: 'connected',
+    3: 'reconnecting',
+    4: 'disconnecting',
+    5: 'disconnected'
+};
+
+/** Các đối tượng được gán sau khi khởi tạo */
+let client = null;
+let manager = null;
+let playerService = null;
+let storage = null;
+let voicePresence = null;
+
 app.get('/', (_req, res) => res.send('Bot Node.js đang hoạt động!'));
-app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
-app.listen(process.env.PORT || 8080, '0.0.0.0', () => {
-    console.log(`🌐 Health server listening on port ${process.env.PORT || 8080}`);
+
+app.get('/health', (_req, res) => {
+    const memory = process.memoryUsage();
+
+    const nodes = manager
+        ? [...manager.shoukaku.nodes.values()].map((node) => ({
+              name: node.name,
+              state: NODE_STATES[node.state] || String(node.state),
+              players: node.stats?.playingPlayers ?? null,
+              penalty: node.penalty ?? null
+          }))
+        : [];
+
+    const connectedNodes = nodes.filter((node) => node.state === 'connected').length;
+    const healthy = connectedNodes > 0 || nodes.length === 0;
+
+    res.status(healthy ? 200 : 503).json({
+        status: healthy ? 'ok' : 'degraded',
+        uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+        memory: {
+            rssMb: Math.round(memory.rss / 1024 / 1024),
+            heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024)
+        },
+        discord: {
+            ready: Boolean(client?.isReady()),
+            guilds: client?.guilds?.cache?.size ?? 0,
+            ping: client?.ws?.ping ?? null
+        },
+        players: manager ? manager.players.size : 0,
+        guildStates: getStateCount(),
+        searchCache: playerService ? playerService.searchCache.stats : null,
+        cooldownKeys: cooldown.size,
+        pendingVoiceLeave: voicePresence ? voicePresence.pendingCount : 0,
+        storage: storage ? { ready: storage.ready, guilds: Object.keys(storage.data.guilds).length } : null,
+        lavalink: nodes
+    });
+});
+
+const server = app.listen(process.env.PORT || 8080, '0.0.0.0', () => {
+    log.info(`Health server đang lắng nghe trên cổng ${process.env.PORT || 8080}`);
 });
 
 // ============================================================
 // 2. Anti-Crash Handlers
 // ============================================================
-process.on('unhandledRejection', (reason) => console.error('⚠️ [ANTI-CRASH] Promise:', reason));
-process.on('uncaughtException', (error) => console.error('⚠️ [ANTI-CRASH] System:', error));
-process.on('uncaughtExceptionMonitor', (error) => console.error('⚠️ [ANTI-CRASH] Monitor:', error));
+process.on('unhandledRejection', (reason) => log.error('[ANTI-CRASH] Promise bị từ chối:', reason));
+process.on('uncaughtException', (error) => log.error('[ANTI-CRASH] Lỗi hệ thống:', error));
+process.on('uncaughtExceptionMonitor', (error) => log.error('[ANTI-CRASH] Giám sát:', error));
 
 // ============================================================
 // 3. Kiểm tra cấu hình Spotify
 // ============================================================
-const spotifyClientId = process.env.SPOTIFY_CLIENT_ID ? process.env.SPOTIFY_CLIENT_ID.trim().replace(/^["']|["']$/g, '') : '';
-const spotifyClientSecret = process.env.SPOTIFY_CLIENT_SECRET ? process.env.SPOTIFY_CLIENT_SECRET.trim().replace(/^["']|["']$/g, '') : '';
-const hasSpotifyCredentials = Boolean(spotifyClientId && spotifyClientSecret);
+const spotifyClientId = (process.env.SPOTIFY_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
+const spotifyClientSecret = (process.env.SPOTIFY_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
 
-if (!hasSpotifyCredentials) {
-    console.log("⚠️ CẢNH BÁO: Chưa cấu hình SPOTIFY_CLIENT_ID hoặc SECRET!");
-    console.log("⚠️ Bot sẽ dùng máy chủ Lavalink dự phòng để phát nhạc.");
+if (!spotifyClientId || !spotifyClientSecret) {
+    log.warn(
+        'Chưa cấu hình SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET — bot sẽ dùng node Lavalink dự phòng để phát nhạc.'
+    );
 } else {
-    console.log("✅ Đã nhận diện Spotify API Key! Sẵn sàng tải hàng ngàn bài hát.");
+    log.info('Đã nhận diện Spotify API Key.');
 }
 
 // ============================================================
 // 4. Discord Client + Kazagumo
 // ============================================================
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.GuildMessages
-    ]
+client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages]
 });
 
-client.manager = new Kazagumo({
-    defaultSearchEngine: "youtube",
-    plugins: [
-        new KazagumoSpotify({
-            clientId: spotifyClientId,
-            clientSecret: spotifyClientSecret,
-            playlistPageLimit: 50,
-            albumPageLimit: 10,
-            searchLimit: 10,
-            searchMarket: 'VN',
-            lavalinkPluginTries: 2 // Luôn dùng Lavalink LavaSrc để phân giải Spotify an toàn và mượt mà, tránh 403 Forbidden từ Spotify Web API
-        })
-    ],
-    send: (guildId, payload) => {
-        const guild = client.guilds.cache.get(guildId);
-        if (guild) guild.shard.send(payload);
+manager = new Kazagumo(
+    {
+        defaultSearchEngine: 'youtube',
+        plugins: [
+            new KazagumoSpotify({
+                clientId: spotifyClientId,
+                clientSecret: spotifyClientSecret,
+                playlistPageLimit: 50,
+                albumPageLimit: 10,
+                searchLimit: 10,
+                searchMarket: 'VN',
+                lavalinkPluginTries: 2
+            })
+        ],
+        send: (guildId, payload) => {
+            const guild = client.guilds.cache.get(guildId);
+            if (guild) guild.shard.send(payload);
+        }
+    },
+    new Connectors.DiscordJS(client),
+    Nodes,
+    {
+        moveOnDisconnect: true,
+        resume: true,
+        reconnectTries: 10,
+        restTimeout: 10000
     }
-}, new Connectors.DiscordJS(client), Nodes, {
-    moveOnDisconnect: true,
-    resume: true,
-    reconnectTries: 10,
-    restTimeout: 10000
-});
-
-// --- Khởi tạo PlayerService ---
-const playerService = new PlayerService(client, client.manager);
+);
 
 // ============================================================
-// 5. Kazagumo / Shoukaku Events
+// 5. Khởi tạo Services
 // ============================================================
-client.manager.shoukaku.on('ready', (name) => {
-    console.log(`✅ Lavalink Node: ${name} đã kết nối!`);
-});
-client.manager.shoukaku.on('error', (name, error) => {
-    console.error(`❌ Lỗi Lavalink Node ${name}:`, error?.message || error);
-});
-client.manager.shoukaku.on('close', (name, code, reason) => {
-    console.warn(`⚠️ Lavalink Node ${name} đã ngắt kết nối (code: ${code}, lý do: ${reason || 'Không rõ'})`);
-});
-client.manager.shoukaku.on('disconnect', (name, count) => {
-    console.warn(`⚠️ Lavalink Node ${name} bị mất kết nối, đang thử kết nối lại (lần ${count})...`);
+storage = new StorageService({
+    filePath: path.join(constants.DATA_DIR, 'guilds.json'),
+    maxHistory: constants.MAX_HISTORY
 });
 
-// Bài hát bắt đầu phát → gửi Now Playing embed
-client.manager.on('playerStart', (player, track) => {
-    playerService.onTrackStart(player, track);
+const searchCache = new SearchCache({
+    max: constants.SEARCH_CACHE_MAX,
+    ttlMs: constants.SEARCH_CACHE_TTL_MS
 });
 
-// Bài hát kết thúc → lưu history, xử lý repeat
-client.manager.on('playerEnd', (player) => {
-    const track = player.queue.current;
-    playerService.onTrackEnd(player, track);
+playerService = new PlayerService(client, manager, {
+    storage,
+    searchCache,
+    autoplayService: new AutoplayService(manager),
+    logger: createLogger('PlayerService')
 });
 
-// Hàng đợi hết bài → hủy player
-client.manager.on('playerEmpty', (player) => {
-    playerService.onPlayerEmpty(player);
+voicePresence = new VoicePresenceService(client, manager, {
+    idleMs: constants.VOICE_EMPTY_LEAVE_MS,
+    onIdle: async (guildId) => {
+        const player = manager.players.get(guildId);
+        if (!player) return;
+
+        const channel = client.channels.cache.get(player.textId);
+        log.info(`Không còn ai trong kênh thoại — rời phòng tại guild ${guildId}.`);
+        await playerService.stop(player);
+        if (channel && typeof channel.send === 'function') {
+            await channel.send('👋 Không còn ai trong kênh thoại nên tôi đã rời phòng.').catch(() => {});
+        }
+    }
 });
 
-// Player bị hủy → dọn state
-client.manager.on('playerDestroy', (player) => {
+// ============================================================
+// 6. Định tuyến tương tác
+// ============================================================
+const ctx = createContext({
+    client,
+    manager,
+    playerService,
+    storage,
+    voicePresence,
+    logger: log
+});
+
+const commandHandler = new CommandHandler(ctx);
+commandHandler.registerAll(commandModules);
+
+const buttonHandler = new ButtonHandler(ctx);
+buttonHandler.register(nowPlayingButtons.prefix, nowPlayingButtons.handle);
+buttonHandler.register(queueButtons.prefix, queueButtons.handle);
+
+const selectHandler = new SelectHandler(ctx);
+selectHandler.register(filterSelect.customId, filterSelect.handle);
+selectHandler.register(searchSelect.customId, searchSelect.handle);
+
+// ============================================================
+// 7. Kazagumo / Shoukaku Events
+// ============================================================
+manager.shoukaku.on('ready', (name) => log.info(`Node Lavalink "${name}" đã kết nối.`));
+manager.shoukaku.on('error', (name, error) => log.error(`Lỗi node Lavalink "${name}":`, error));
+manager.shoukaku.on('close', (name, code, reason) => {
+    log.warn(`Node Lavalink "${name}" đã ngắt kết nối (code ${code}): ${reason || 'không rõ lý do'}`);
+});
+manager.shoukaku.on('disconnect', (name, count) => {
+    log.warn(`Node Lavalink "${name}" mất kết nối, đang thử lại (lần ${count})...`);
+});
+
+manager.on('playerStart', (player, track) => {
+    playerService.onTrackStart(player, track).catch((err) => log.error('Lỗi trong onTrackStart:', err));
+});
+
+manager.on('playerEnd', (player) => {
+    try {
+        playerService.onTrackEnd(player, player.queue.current);
+    } catch (err) {
+        log.error('Lỗi trong onTrackEnd:', err);
+    }
+});
+
+manager.on('playerEmpty', (player) => {
+    playerService.onPlayerEmpty(player).catch((err) => log.error('Lỗi trong onPlayerEmpty:', err));
+});
+
+manager.on('playerDestroy', (player) => {
     playerService.onPlayerDestroy(player.guildId);
 });
 
-// Bắt lỗi playback & resolve để debug trên Render
-client.manager.on('playerResolveError', (player, track, message) => {
-    console.error(`❌ [Kazagumo] Lỗi resolve bài hát "${track?.title}":`, message);
+manager.on('playerResolveError', (player, track, message) => {
+    log.error(`Không phân giải được bài hát "${track?.title}":`, message);
 });
-client.manager.on('playerException', (player, data) => {
-    console.error('❌ [Kazagumo] Player exception:', data);
-});
-client.manager.on('playerClosed', (player, data) => {
-    console.warn('⚠️ [Kazagumo] Player voice connection closed:', data);
-});
+manager.on('playerException', (_player, data) => log.error('Player exception:', data));
+manager.on('playerClosed', (_player, data) => log.warn('Kết nối thoại bị đóng:', data));
 
 // ============================================================
-// 6. Đăng ký Slash Commands
+// 8. Đăng ký Slash Commands
 // ============================================================
-const slashCommands = [
-    playCmd.definition,
-    playtopCmd.definition,
-    playskipCmd.definition,
-    ...skipCmd.definitions,  // skip có 2 definitions: skip + skipto
-    pauseCmd.definition,
-    resumeCmd.definition,
-    stopCmd.definition,
-    queueCmd.definition,
-    repeatCmd.definition,
-    shuffleCmd.definition,
-    historyCmd.definition,
-    previousCmd.definition,
-    volumeCmd.definition,
-    ...nowplayingCmd.definitions
-];
-
 client.once(Events.ClientReady, async () => {
-    console.log(`🎉 Bot đã online: ${client.user.tag}`);
+    log.info(`Bot đã online: ${client.user.tag}`);
+
+    await storage.init();
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    const body = commandHandler.getDefinitions();
+
     try {
-        console.log('🔄 Đang đăng ký slash commands...');
-        await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-        console.log(`✅ Đã đăng ký ${slashCommands.length} slash commands!`);
+        log.info(`Đang đăng ký ${body.length} slash command...`);
+
+        // DEV_GUILD_ID giúp lệnh xuất hiện ngay lập tức khi phát triển
+        const route = process.env.DEV_GUILD_ID
+            ? Routes.applicationGuildCommands(client.user.id, process.env.DEV_GUILD_ID)
+            : Routes.applicationCommands(client.user.id);
+
+        await rest.put(route, { body });
+        log.info(`Đã đăng ký ${body.length} slash command${process.env.DEV_GUILD_ID ? ' cho guild phát triển' : ''}.`);
     } catch (err) {
-        console.error('❌ Lỗi đăng ký slash commands:', err);
+        log.error('Lỗi đăng ký slash commands:', err);
     }
+
+    voicePresence.start();
+    startMaintenanceJobs();
 });
 
 // ============================================================
-// 7. Interaction Router (Commands + Buttons)
+// 9. Interaction Router
 // ============================================================
 client.on('interactionCreate', async (interaction) => {
     try {
-        // --- Slash Commands ---
         if (interaction.isChatInputCommand()) {
-            switch (interaction.commandName) {
-                case 'play':
-                    return await playCmd.execute(interaction, playerService);
-                case 'playtop':
-                    return await playtopCmd.execute(interaction, playerService);
-                case 'playskip':
-                    return await playskipCmd.execute(interaction, playerService);
-                case 'skip':
-                    return await skipCmd.executeSkip(interaction, playerService);
-                case 'skipto':
-                    return await skipCmd.executeSkipTo(interaction, playerService);
-                case 'pause':
-                    return await pauseCmd.execute(interaction, playerService);
-                case 'resume':
-                    return await resumeCmd.execute(interaction, playerService);
-                case 'stop':
-                    return await stopCmd.execute(interaction, playerService);
-                case 'queue':
-                    return await queueCmd.execute(interaction, playerService);
-                case 'repeat':
-                    return await repeatCmd.execute(interaction, playerService);
-                case 'shuffle':
-                    return await shuffleCmd.execute(interaction, playerService);
-                case 'history':
-                    return await historyCmd.execute(interaction, playerService);
-                case 'previous':
-                    return await previousCmd.execute(interaction, playerService);
-                case 'volume':
-                    return await volumeCmd.execute(interaction, playerService);
-                case 'nowplaying':
-                case 'np':
-                    return await nowplayingCmd.execute(interaction, playerService);
-            }
+            return await commandHandler.dispatch(interaction);
         }
 
-        // --- Button Interactions (Now Playing & Queue pagination) ---
         if (interaction.isButton()) {
-            const customId = interaction.customId;
-
-            // Now Playing buttons
-            if (customId.startsWith('np_')) {
-                const player = client.manager.players.get(interaction.guild.id);
-                if (!player) {
-                    return interaction.reply({ content: '❌ Không có kết nối âm thanh.', ephemeral: true });
-                }
-
-                // Kiểm tra user ở cùng voice channel
-                const memberVoice = interaction.member.voice?.channel;
-                if (!memberVoice || memberVoice.id !== player.voiceId) {
-                    return interaction.reply({ content: '❌ Bạn cần ở cùng kênh thoại với bot!', ephemeral: true });
-                }
-
-                await interaction.deferUpdate();
-
-                switch (customId) {
-                    case 'np_previous': {
-                        const result = playerService.previous(player);
-                        if (!result.ok) {
-                            await interaction.followUp({ content: result.error, ephemeral: true });
-                        }
-                        break;
-                    }
-                    case 'np_pause_resume': {
-                        if (player.paused) {
-                            playerService.resume(player);
-                        } else {
-                            playerService.pause(player);
-                        }
-                        // Update embed ngay lập tức
-                        const state = getState(interaction.guild.id);
-                        const NowPlayingUI = require('./src/services/ui/NowPlayingUI');
-                        const updated = NowPlayingUI.create(player, player.queue.current, state);
-                        await interaction.editReply({ embeds: [updated.embed], components: updated.components });
-                        break;
-                    }
-                    case 'np_skip': {
-                        playerService.skip(player);
-                        break;
-                    }
-                    case 'np_repeat': {
-                        const state = getState(interaction.guild.id);
-                        state.cycleRepeatMode();
-                        const NowPlayingUI = require('./src/services/ui/NowPlayingUI');
-                        const updated = NowPlayingUI.create(player, player.queue.current, state);
-                        await interaction.editReply({ embeds: [updated.embed], components: updated.components });
-                        break;
-                    }
-                    case 'np_shuffle': {
-                        if (player.queue.length > 1) {
-                            queueService.shuffle(player);
-                            await interaction.followUp({ content: `🔀 Đã xáo trộn **${player.queue.length}** bài!`, ephemeral: true });
-                        } else {
-                            await interaction.followUp({ content: '❌ Cần ít nhất 2 bài để xáo trộn.', ephemeral: true });
-                        }
-                        break;
-                    }
-                    case 'np_vol_down': {
-                        const newVol = Math.max(10, (player.volume || 100) - 10);
-                        await player.setVolume(newVol);
-                        const state = getState(interaction.guild.id);
-                        const NowPlayingUI = require('./src/services/ui/NowPlayingUI');
-                        const updated = NowPlayingUI.create(player, player.queue.current, state);
-                        await interaction.editReply({ embeds: [updated.embed], components: updated.components });
-                        break;
-                    }
-                    case 'np_vol_up': {
-                        const newVol = Math.min(200, (player.volume || 100) + 10);
-                        await player.setVolume(newVol);
-                        const state = getState(interaction.guild.id);
-                        const NowPlayingUI = require('./src/services/ui/NowPlayingUI');
-                        const updated = NowPlayingUI.create(player, player.queue.current, state);
-                        await interaction.editReply({ embeds: [updated.embed], components: updated.components });
-                        break;
-                    }
-                    case 'np_queue': {
-                        const { embed, components } = QueueUI.create(player, 1);
-                        await interaction.followUp({ embeds: [embed], components, ephemeral: true });
-                        break;
-                    }
-                    case 'np_stop': {
-                        playerService.stop(player);
-                        await interaction.editReply({
-                            embeds: [],
-                            components: [],
-                            content: '🛑 Đã dừng nhạc và xóa toàn bộ hàng đợi.'
-                        });
-                        break;
-                    }
-                }
-                return;
-            }
-
-            // Queue pagination buttons
-            if (customId.startsWith('queue_') && customId !== 'queue_page_indicator') {
-                const player = client.manager.players.get(interaction.guild.id);
-                if (!player) {
-                    return interaction.reply({ content: '❌ Không có kết nối âm thanh.', ephemeral: true });
-                }
-
-                await interaction.deferUpdate();
-                const targetPage = QueueUI.parsePageFromButton(customId);
-                const { embed, components } = QueueUI.create(player, targetPage);
-                await interaction.editReply({ embeds: [embed], components });
-                return;
-            }
+            return await buttonHandler.dispatch(interaction);
         }
 
-    } catch (globalErr) {
-        console.error("🚨 LỖI CHI TIẾT KHI CHẠY LỆNH:", globalErr);
-        try {
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply("❌ Lỗi hệ thống! Tôi đã ghi chi tiết lỗi vào log.").catch(() => {});
-            } else {
-                await interaction.reply({ content: "❌ Lỗi hệ thống! Hãy kiểm tra log.", ephemeral: true }).catch(() => {});
-            }
-        } catch { /* Bỏ qua lỗi khi cố phản hồi interaction đã hết hạn */ }
+        if (interaction.isStringSelectMenu()) {
+            return await selectHandler.dispatch(interaction);
+        }
+    } catch (err) {
+        log.error('Lỗi không mong đợi khi xử lý tương tác:', err);
     }
 });
 
 // ============================================================
-// 8. Đăng nhập Discord
+// 10. Dọn dẹp định kỳ (cache, cooldown, phiên tìm kiếm)
+// ============================================================
+let maintenanceInterval = null;
+
+function startMaintenanceJobs() {
+    const run = () => {
+        const removedCache = searchCache.prune();
+        const removedSessions = SearchUI.prune();
+        const removedCooldown = cooldown.sweep();
+        if (removedCache || removedSessions || removedCooldown) {
+            log.debug(
+                `Dọn dẹp định kỳ: cache=${removedCache}, phiên tìm kiếm=${removedSessions}, cooldown=${removedCooldown}`
+            );
+        }
+    };
+
+    maintenanceInterval = setInterval(run, 5 * 60 * 1000);
+    if (typeof maintenanceInterval.unref === 'function') maintenanceInterval.unref();
+}
+
+// ============================================================
+// 11. Graceful Shutdown
+// ============================================================
+let shuttingDown = false;
+
+async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info(`Nhận tín hiệu ${signal} — đang tắt bot an toàn...`);
+
+    try {
+        if (voicePresence) voicePresence.stop();
+    } catch {
+        /* bỏ qua */
+    }
+    try {
+        if (maintenanceInterval) clearInterval(maintenanceInterval);
+    } catch {
+        /* bỏ qua */
+    }
+
+    try {
+        for (const player of manager.players.values()) {
+            await player.destroy().catch(() => {});
+        }
+    } catch (err) {
+        log.warn('Không hủy được toàn bộ player:', err.message);
+    }
+
+    try {
+        await storage.close();
+    } catch (err) {
+        log.warn('Không ghi nốt dữ liệu:', err.message);
+    }
+    try {
+        server.close();
+    } catch {
+        /* bỏ qua */
+    }
+    try {
+        client.destroy();
+    } catch {
+        /* bỏ qua */
+    }
+
+    log.info('Đã tắt bot.');
+    process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// ============================================================
+// 12. Đăng nhập Discord
 // ============================================================
 client.login(process.env.DISCORD_TOKEN);

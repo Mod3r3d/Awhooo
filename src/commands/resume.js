@@ -2,22 +2,27 @@
  * /resume — Tiếp tục phát nhạc.
  */
 
-const { checkPlayer, checkSameVoiceChannel } = require('../utils/permissions');
+const definitions = [
+    {
+        name: 'resume',
+        description: 'Tiếp tục phát bài hát'
+    }
+];
 
-const definition = {
-    name: 'resume',
-    description: 'Tiếp tục phát nhạc'
+const meta = {
+    requiresPlayer: true,
+    sameVoice: true,
+    defer: 'ephemeral'
 };
 
-async function execute(interaction, playerService) {
-    const playerCheck = checkPlayer(playerService.manager, interaction.guild.id);
-    if (!playerCheck.ok) return interaction.reply({ content: playerCheck.error, ephemeral: true });
-
-    const voiceCheck = checkSameVoiceChannel(interaction.member, playerCheck.player);
-    if (!voiceCheck.ok) return interaction.reply({ content: voiceCheck.error, ephemeral: true });
-
-    playerService.resume(playerCheck.player);
-    await interaction.reply('▶️ Đã tiếp tục phát nhạc!');
+/**
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @param {object} ctx
+ */
+async function execute(interaction, ctx) {
+    ctx.playerService.resume(ctx.player);
+    await ctx.playerService.refreshPanels(ctx.player);
+    await interaction.editReply(ctx.t('commands.resume.done'));
 }
 
-module.exports = { definition, execute };
+module.exports = { definitions, meta, execute };

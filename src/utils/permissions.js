@@ -1,16 +1,19 @@
 /**
- * Permission utilities — Kiểm tra điều kiện Voice Channel và quyền.
+ * permissions.js — Kiểm tra điều kiện kênh thoại và trạng thái player.
+ *
+ * Các hàm ở đây trả về KHOÁ DỊCH (ví dụ `common.needVoice`) chứ không trả về
+ * chuỗi đã dịch, để tầng gọi tự quyết định ngôn ngữ hiển thị.
  */
 
 /**
  * Kiểm tra xem member có ở trong voice channel hay không.
  * @param {import('discord.js').GuildMember} member
- * @returns {{ ok: boolean, channel?: import('discord.js').VoiceChannel, error?: string }}
+ * @returns {{ ok: boolean, channel?: import('discord.js').VoiceBasedChannel, error?: string }}
  */
 function checkVoiceChannel(member) {
-    const channel = member.voice?.channel;
+    const channel = member?.voice?.channel;
     if (!channel) {
-        return { ok: false, error: '❌ Bạn cần vào kênh thoại trước!' };
+        return { ok: false, error: 'common.needVoice' };
     }
     return { ok: true, channel };
 }
@@ -19,14 +22,14 @@ function checkVoiceChannel(member) {
  * Kiểm tra xem member có ở CÙNG voice channel với bot hay không.
  * @param {import('discord.js').GuildMember} member
  * @param {object} player - Kazagumo player
- * @returns {{ ok: boolean, error?: string }}
+ * @returns {{ ok: boolean, channel?: import('discord.js').VoiceBasedChannel, error?: string }}
  */
 function checkSameVoiceChannel(member, player) {
     const voiceCheck = checkVoiceChannel(member);
     if (!voiceCheck.ok) return voiceCheck;
 
     if (player && player.voiceId && voiceCheck.channel.id !== player.voiceId) {
-        return { ok: false, error: '❌ Bạn cần ở cùng kênh thoại với bot!' };
+        return { ok: false, error: 'common.needSameVoice' };
     }
     return { ok: true, channel: voiceCheck.channel };
 }
@@ -40,7 +43,7 @@ function checkSameVoiceChannel(member, player) {
 function checkPlayer(manager, guildId) {
     const player = manager.players.get(guildId);
     if (!player) {
-        return { ok: false, error: '❌ Không có kết nối âm thanh.' };
+        return { ok: false, error: 'common.noPlayer' };
     }
     return { ok: true, player };
 }
@@ -52,7 +55,7 @@ function checkPlayer(manager, guildId) {
  */
 function checkPlaying(player) {
     if (!player || (!player.playing && !player.paused)) {
-        return { ok: false, error: '❌ Không có bài nào đang phát.' };
+        return { ok: false, error: 'common.noPlaying' };
     }
     return { ok: true };
 }

@@ -2,25 +2,31 @@
  * /pause — Tạm dừng nhạc.
  */
 
-const { checkPlayer, checkPlaying, checkSameVoiceChannel } = require('../utils/permissions');
+const definitions = [
+    {
+        name: 'pause',
+        description: 'Tạm dừng phát nhạc'
+    }
+];
 
-const definition = {
-    name: 'pause',
-    description: 'Tạm dừng nhạc'
+const meta = {
+    requiresPlayer: true,
+    requiresPlaying: true,
+    sameVoice: true,
+    defer: 'ephemeral'
 };
 
-async function execute(interaction, playerService) {
-    const playerCheck = checkPlayer(playerService.manager, interaction.guild.id);
-    if (!playerCheck.ok) return interaction.reply({ content: playerCheck.error, ephemeral: true });
+/**
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @param {object} ctx
+ */
+async function execute(interaction, ctx) {
+    ctx.playerService.pause(ctx.player);
 
-    const voiceCheck = checkSameVoiceChannel(interaction.member, playerCheck.player);
-    if (!voiceCheck.ok) return interaction.reply({ content: voiceCheck.error, ephemeral: true });
+    // Cập nhật ngay bảng Now Playing (ticker sẽ tự bỏ qua khi đang tạm dừng)
+    await ctx.playerService.refreshPanels(ctx.player);
 
-    const playingCheck = checkPlaying(playerCheck.player);
-    if (!playingCheck.ok) return interaction.reply({ content: '❌ Không có bài nào đang phát.', ephemeral: true });
-
-    playerService.pause(playerCheck.player);
-    await interaction.reply('⏸️ Đã tạm dừng nhạc!');
+    await interaction.editReply(ctx.t('commands.pause.done'));
 }
 
-module.exports = { definition, execute };
+module.exports = { definitions, meta, execute };

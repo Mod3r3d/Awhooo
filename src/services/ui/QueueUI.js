@@ -4,6 +4,7 @@
 
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { formatDuration, truncate, totalDuration } = require('../../utils/formatters');
+const { t } = require('../../locales');
 
 /** Số bài mỗi trang */
 const TRACKS_PER_PAGE = 10;
@@ -22,9 +23,9 @@ class QueueUI {
         if (!current && queue.length === 0) {
             return {
                 embed: new EmbedBuilder()
-                    .setColor(0x95A5A6)
-                    .setTitle('📭 Hàng đợi trống')
-                    .setDescription('Sử dụng `/play` để thêm bài hát!')
+                    .setColor(0x95a5a6)
+                    .setTitle(t('ui.queue.emptyTitle'))
+                    .setDescription(t('ui.queue.emptyHint'))
                     .setTimestamp(),
                 components: []
             };
@@ -38,21 +39,19 @@ class QueueUI {
         const end = Math.min(start + TRACKS_PER_PAGE, totalTracks);
 
         // --- Xây dựng Embed ---
-        const embed = new EmbedBuilder()
-            .setColor(0x5865F2)
-            .setTitle('🎵 Danh Sách Chờ')
-            .setTimestamp();
+        const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(t('ui.queue.title')).setTimestamp();
 
         // Bài đang phát
         if (current) {
             const curDur = formatDuration(current.length || current.duration || 0);
             const curRequester = current.requester
-                ? (current.requester.globalName || current.requester.username)
-                : 'N/A';
+                ? current.requester.globalName || current.requester.username
+                : t('ui.queue.notAvailable');
             embed.addFields({
-                name: '▶️ Đang phát',
-                value: `**${truncate(current.title, 55)}** — ${current.author || 'N/A'}\n` +
-                       `\`${curDur}\` • Yêu cầu bởi **${curRequester}**`,
+                name: t('ui.queue.nowPlaying'),
+                value:
+                    `**${truncate(current.title, 55)}** — ${current.author || t('ui.queue.notAvailable')}\n` +
+                    `\`${curDur}\` • 👤 ${curRequester}`,
                 inline: false
             });
         }
@@ -66,14 +65,14 @@ class QueueUI {
                 const dur = formatDuration(track.length || track.duration || 0);
                 const title = truncate(track.title || 'Unknown', 45);
                 const requester = track.requester
-                    ? (track.requester.globalName || track.requester.username)
-                    : 'N/A';
+                    ? track.requester.globalName || track.requester.username
+                    : t('ui.queue.notAvailable');
 
                 lines.push(`\`${num}.\` **${title}**\n　　\`${dur}\` • 👤 ${requester}`);
             }
             embed.addFields({
-                name: `📋 Hàng đợi (${totalTracks} bài)`,
-                value: lines.join('\n') || 'Trống',
+                name: t('ui.queue.listName', { count: totalTracks }),
+                value: lines.join('\n') || '—',
                 inline: false
             });
         }
@@ -83,10 +82,14 @@ class QueueUI {
         const currentRemaining = current
             ? Math.max(0, (current.length || current.duration || 0) - (player.position || 0))
             : 0;
-        const grandTotal = queueDuration + currentRemaining;
 
         embed.setFooter({
-            text: `Trang ${safePage}/${totalPages} │ ⏱ Tổng thời lượng: ${formatDuration(grandTotal)} │ 📦 ${totalTracks} bài trong hàng đợi`
+            text: t('ui.queue.footer', {
+                page: safePage,
+                totalPages,
+                duration: formatDuration(queueDuration + currentRemaining),
+                count: totalTracks
+            })
         });
 
         // --- Nút phân trang ---
@@ -133,23 +136,28 @@ class QueueUI {
     /**
      * Phân tích customId của nút phân trang để lấy số trang đích.
      * @param {string} customId - Ví dụ: "queue_next_3", "queue_prev_5", "queue_first", "queue_last_10"
-     * @param {number} currentPage - Trang hiện tại
+     * @param {number} [currentPage=1] - Trang hiện tại
      * @returns {number} Trang đích
      */
     static parsePageFromButton(customId, currentPage = 1) {
         if (customId === 'queue_first') return 1;
         if (customId.startsWith('queue_last_')) {
-            return parseInt(customId.split('_')[2]) || 1;
+            return parseInt(customId.split('_')[2], 10) || 1;
         }
         if (customId.startsWith('queue_next_')) {
-            const fromPage = parseInt(customId.split('_')[2]) || currentPage;
+            const fromPage = parseInt(customId.split('_')[2], 10) || currentPage;
             return fromPage + 1;
         }
         if (customId.startsWith('queue_prev_')) {
-            const fromPage = parseInt(customId.split('_')[2]) || currentPage;
+            const fromPage = parseInt(customId.split('_')[2], 10) || currentPage;
             return Math.max(1, fromPage - 1);
         }
         return currentPage;
+    }
+
+    /** Số bài mỗi trang. */
+    static get TRACKS_PER_PAGE() {
+        return TRACKS_PER_PAGE;
     }
 }
 

@@ -2,22 +2,27 @@
  * /stop — Dừng nhạc, xóa hàng đợi, ngắt kết nối.
  */
 
-const { checkPlayer, checkSameVoiceChannel } = require('../utils/permissions');
+const definitions = [
+    {
+        name: 'stop',
+        description: 'Dừng nhạc và thoát khỏi kênh thoại'
+    }
+];
 
-const definition = {
-    name: 'stop',
-    description: 'Dừng nhạc và thoát khỏi kênh thoại'
+const meta = {
+    requiresPlayer: true,
+    sameVoice: true,
+    defer: 'ephemeral'
 };
 
-async function execute(interaction, playerService) {
-    const playerCheck = checkPlayer(playerService.manager, interaction.guild.id);
-    if (!playerCheck.ok) return interaction.reply({ content: '❌ Bot không ở trong kênh thoại.', ephemeral: true });
-
-    const voiceCheck = checkSameVoiceChannel(interaction.member, playerCheck.player);
-    if (!voiceCheck.ok) return interaction.reply({ content: voiceCheck.error, ephemeral: true });
-
-    await playerService.stop(playerCheck.player);
-    await interaction.reply('🛑 Đã dừng nhạc và xóa toàn bộ hàng đợi.');
+/**
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @param {object} ctx
+ */
+async function execute(interaction, ctx) {
+    // stop() sẽ tự chuyển các bảng Now Playing sang trạng thái "đã dừng"
+    await ctx.playerService.stop(ctx.player);
+    await interaction.editReply(ctx.t('commands.stop.done'));
 }
 
-module.exports = { definition, execute };
+module.exports = { definitions, meta, execute };

@@ -2,74 +2,88 @@
  * /play — Phát nhạc từ URL hoặc từ khóa tìm kiếm.
  */
 
-const { checkVoiceChannel } = require('../utils/permissions');
+const { COMMAND_COOLDOWN_MS } = require('../config/constants');
+const { enqueueErrorText, trimNote, combineNotes } = require('./helpers');
 
-/** Định nghĩa Slash Command */
-const definition = {
-    name: 'play',
-    description: 'Phát nhạc từ YouTube, Spotify hoặc từ khóa',
-    options: [{
-        name: 'query',
-        type: 3, // STRING
-        description: 'Tên bài hát hoặc URL (YouTube, Spotify, SoundCloud...)',
-        required: true
-    }]
+const definitions = [
+    {
+        name: 'play',
+        description: 'Phát nhạc từ YouTube, Spotify hoặc từ khóa',
+        options: [
+            {
+                name: 'query',
+                type: 3, // STRING
+                description: 'Tên bài hát hoặc URL (YouTube, Spotify, SoundCloud...)',
+                required: true
+            }
+        ]
+    }
+];
+
+const meta = {
+    requiresVoice: true,
+    defer: 'ephemeral',
+    cooldown: COMMAND_COOLDOWN_MS
 };
 
 /**
- * Xử lý lệnh /play.
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
- * @param {import('../services/player/PlayerService')} playerService
+ * @param {object} ctx - Ngữ cảnh bot
  */
-async function execute(interaction, playerService) {
+async function execute(interaction, ctx) {
+    const { playerService, voiceChannel, t } = ctx;
     const query = interaction.options.getString('query');
-    console.log(`[play] Nhận lệnh từ ${interaction.user.tag} với query: "${query}"`);
+    const guildId = interaction.guild.id;
 
-    // Kiểm tra user có ở voice channel không
-    const voiceCheck = checkVoiceChannel(interaction.member);
-    if (!voiceCheck.ok) {
-        return interaction.reply({ content: voiceCheck.error, ephemeral: true });
+    // Bảng Now Playing hiển thị riêng cho người gọi lệnh (ephemeral)
+    const player = await playerService.getOrCreatePlayer({
+        guildId,
+        textId: interaction.channelId,
+        voiceId: voiceChannel.id
+    });
+
+    playerService.registerEphemeralContext(interaction, player);
+
+    const result = await playerService.search(query, interaction.user);
+
+    if (!result.tracks.length) {
+        playerService.releaseEphemeralContext(guildId);
+        return interaction.editReply(t('commands.play.noResult'));
     }
 
-    await interaction.deferReply();
+    if (result.type === 'PLAYLIST') {
+        const enqueued = await playerService.enqueue(player, result.tracks, { requesterId: interaction.user.id });
 
-    try {
-        // Lấy hoặc tạo player
-        const player = await playerService.getOrCreatePlayer({
-            guildId: interaction.guild.id,
-            textId: interaction.channel.id,
-            voiceId: voiceCheck.channel.id
-        });
-
-        // Tìm kiếm
-        const result = await playerService.search(query, interaction.user);
-        if (!result || !result.tracks || !result.tracks.length) {
-            return interaction.editReply('❌ Không tìm thấy bài hát hoặc danh sách phát trống!');
+        if (!enqueued.ok) {
+            playerService.releaseEphemeralContext(guildId);
+            return interaction.editReply(enqueueErrorText(enqueued, t));
         }
 
-        // Xử lý kết quả
-        if (result.type === 'PLAYLIST') {
-            await playerService.enqueueMultipleAndPlay(player, result.tracks);
-            await interaction.editReply(
-                `🟢 Đã nạp Playlist **${result.playlistName || 'Danh sách phát'}** gồm **${result.tracks.length}** bài hát!`
-            );
-        } else {
-            const track = result.tracks[0];
-            await playerService.enqueueAndPlay(player, track);
-            await interaction.editReply(`🟢 Đã thêm: **${track.title}**`);
-        }
-    } catch (err) {
-        console.error('[play] Error:', err);
-        const errMsg = err?.message || String(err);
-        const userMsg = errMsg.includes('No node')
-            ? '❌ Máy chủ phát nhạc (Lavalink) hiện đang kết nối lại. Vui lòng thử lại sau vài giây!'
-            : `❌ Lỗi khi tải nhạc: ${errMsg}`;
-        if (interaction.deferred) {
-            await interaction.editReply(userMsg);
-        } else {
-            await interaction.reply({ content: userMsg, ephemeral: true });
-        }
+        const note = combineNotes(
+            t('commands.play.playlistAdded', {
+                name: result.playlistName || 'Playlist',
+                count: enqueued.added
+            }),
+            trimNote(enqueued, result.tracks.length, t)
+        );
+
+        await playerService.renderEphemeralPanel(player, player.queue.current || result.tracks[0], note);
+        return;
     }
+
+    const track = result.tracks[0];
+    const enqueued = await playerService.enqueue(player, [track], { requesterId: interaction.user.id });
+
+    if (!enqueued.ok) {
+        playerService.releaseEphemeralContext(guildId);
+        return interaction.editReply(enqueueErrorText(enqueued, t));
+    }
+
+    await playerService.renderEphemeralPanel(
+        player,
+        player.queue.current || track,
+        t('commands.play.added', { title: track.title })
+    );
 }
 
-module.exports = { definition, execute };
+module.exports = { definitions, meta, execute };

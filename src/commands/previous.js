@@ -2,26 +2,41 @@
  * /previous — Phát lại bài hát gần nhất từ lịch sử.
  */
 
-const { checkPlayer, checkSameVoiceChannel } = require('../utils/permissions');
+const definitions = [
+    {
+        name: 'previous',
+        description: 'Phát lại bài hát vừa nghe gần nhất'
+    }
+];
 
-const definition = {
-    name: 'previous',
-    description: 'Phát lại bài hát vừa nghe gần nhất'
+const meta = {
+    requiresPlayer: true,
+    sameVoice: true,
+    defer: 'ephemeral'
 };
 
-async function execute(interaction, playerService) {
-    const playerCheck = checkPlayer(playerService.manager, interaction.guild.id);
-    if (!playerCheck.ok) return interaction.reply({ content: playerCheck.error, ephemeral: true });
+/**
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @param {object} ctx
+ */
+async function execute(interaction, ctx) {
+    const { playerService, player, t } = ctx;
 
-    const voiceCheck = checkSameVoiceChannel(interaction.member, playerCheck.player);
-    if (!voiceCheck.ok) return interaction.reply({ content: voiceCheck.error, ephemeral: true });
+    // Đăng ký trước để bảng Now Playing hiện trên chính tin nhắn phản hồi này
+    playerService.registerEphemeralContext(interaction, player);
 
-    const result = playerService.previous(playerCheck.player);
+    const result = await playerService.previous(player);
+
     if (!result.ok) {
-        return interaction.reply({ content: result.error, ephemeral: true });
+        playerService.releaseEphemeralContext(interaction.guild.id);
+        return interaction.editReply(t(result.error));
     }
 
-    await interaction.reply(`⏮️ Đang phát lại: **${result.track.title || 'Unknown'}**`);
+    await playerService.renderEphemeralPanel(
+        player,
+        result.track,
+        t('commands.previous.playing', { title: result.track.title || 'Unknown' })
+    );
 }
 
-module.exports = { definition, execute };
+module.exports = { definitions, meta, execute };

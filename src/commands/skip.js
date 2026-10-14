@@ -2,8 +2,6 @@
  * /skip & /skipto — Bỏ qua bài hiện tại hoặc nhảy đến vị trí trong queue.
  */
 
-const { checkPlayer, checkPlaying, checkSameVoiceChannel } = require('../utils/permissions');
-
 const definitions = [
     {
         name: 'skip',
@@ -12,42 +10,49 @@ const definitions = [
     {
         name: 'skipto',
         description: 'Nhảy đến vị trí bài hát trong hàng đợi',
-        options: [{
-            name: 'index',
-            type: 4, // INTEGER
-            description: 'Nhập số thứ tự bài hát (VD: 5)',
-            required: true
-        }]
+        options: [
+            {
+                name: 'index',
+                type: 4, // INTEGER
+                description: 'Nhập số thứ tự bài hát (VD: 5)',
+                required: true,
+                min_value: 1
+            }
+        ]
     }
 ];
 
-async function executeSkip(interaction, playerService) {
-    const playerCheck = checkPlayer(playerService.manager, interaction.guild.id);
-    if (!playerCheck.ok) return interaction.reply({ content: playerCheck.error, ephemeral: true });
+const meta = {
+    requiresPlayer: true,
+    requiresPlaying: true,
+    sameVoice: true,
+    defer: 'ephemeral'
+};
 
-    const voiceCheck = checkSameVoiceChannel(interaction.member, playerCheck.player);
-    if (!voiceCheck.ok) return interaction.reply({ content: voiceCheck.error, ephemeral: true });
-
-    const playingCheck = checkPlaying(playerCheck.player);
-    if (!playingCheck.ok) return interaction.reply({ content: '❌ Không có bài nào để bỏ qua.', ephemeral: true });
-
-    playerService.skip(playerCheck.player);
-    await interaction.reply('⏭️ Đã bỏ qua bài hiện tại!');
+/**
+ * /skip
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @param {object} ctx
+ */
+async function skip(interaction, ctx) {
+    ctx.playerService.skip(ctx.player);
+    await interaction.editReply(ctx.t('commands.skip.skipped'));
 }
 
-async function executeSkipTo(interaction, playerService) {
+/**
+ * /skipto
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @param {object} ctx
+ */
+async function skipto(interaction, ctx) {
     const position = interaction.options.getInteger('index');
+    const result = ctx.playerService.skipTo(ctx.player, position);
 
-    const playerCheck = checkPlayer(playerService.manager, interaction.guild.id);
-    if (!playerCheck.ok) return interaction.reply({ content: playerCheck.error, ephemeral: true });
+    if (!result.ok) {
+        return interaction.editReply(ctx.t(result.error, result.vars));
+    }
 
-    const voiceCheck = checkSameVoiceChannel(interaction.member, playerCheck.player);
-    if (!voiceCheck.ok) return interaction.reply({ content: voiceCheck.error, ephemeral: true });
-
-    const result = playerService.skipTo(playerCheck.player, position);
-    if (!result.ok) return interaction.reply({ content: result.error, ephemeral: true });
-
-    await interaction.reply(`⏭️ Đã nhảy thẳng đến bài số **${position}**!`);
+    await interaction.editReply(ctx.t('commands.skipto.done', { position }));
 }
 
-module.exports = { definitions, executeSkip, executeSkipTo };
+module.exports = { definitions, meta, handlers: { skip, skipto } };

@@ -1,1 +1,24 @@
 .env
+
+# --- Node.js ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+*.log
+
+# --- Dữ liệu bền vững của bot ---
+data/
+*.corrupt-*
+
+# --- Kiểm thử & công cụ ---
+coverage/
+.nyc_output/
+.eslintcache
+dist/
+
+# --- Hệ điều hành / IDE / công cụ ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.workbuddy-ai/

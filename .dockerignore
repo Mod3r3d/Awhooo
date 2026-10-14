@@ -1,9 +1,25 @@
 .git
 .gitignore
+.dockerignore
 *.exe
 __pycache__
 *.pyc
 .env
+
+# Không copy node_modules của máy host đè lên node_modules trong image
+node_modules
+npm-debug.log*
+*.log
+
+# Dữ liệu bền vững: mount bằng volume khi chạy, không bake vào image
+data
+
+# Tài liệu, kiểm thử, công cụ phát triển
 README*
 *.md
 tests/
+coverage/
+.nyc_output/
+.eslintcache
+.github/
+.workbuddy-ai/

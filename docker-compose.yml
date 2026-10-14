@@ -1,0 +1,70 @@
+# ============================================================
+# Chạy bot + Lavalink v4 tự host chỉ bằng một lệnh:
+#   docker compose up -d --build
+#
+# Cần tạo file .env trước (xem .env.example), tối thiểu phải có DISCORD_TOKEN.
+# ============================================================
+
+services:
+  # ----------------------------------------------------------
+  # Máy chủ âm thanh Lavalink v4
+  # ----------------------------------------------------------
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4
+    container_name: lavalink
+    restart: unless-stopped
+    environment:
+      - _JAVA_OPTIONS=-Xmx1G
+      - SERVER_PORT=2333
+      - SERVER_ADDRESS=0.0.0.0
+      - LAVALINK_SERVER_PASSWORD=${LAVALINK_AUTH:-youshallnotpass}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      - lavalink-plugins:/opt/Lavalink/plugins
+    networks:
+      - musicbot
+    healthcheck:
+      test: ['CMD-SHELL', 'nc -z 127.0.0.1 2333 || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # ----------------------------------------------------------
+  # Bot Discord
+  # ----------------------------------------------------------
+  bot:
+    build: .
+    container_name: music-bot
+    restart: unless-stopped
+    depends_on:
+      lavalink:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      # Trỏ thẳng tới service lavalink trong cùng network nội bộ.
+      # Phải bọc trong dấu nháy đơn để YAML không hiểu nhầm thành mảng.
+      - 'LAVALINK_NODES=[{"name":"Local","url":"lavalink:2333","auth":"${LAVALINK_AUTH:-youshallnotpass}","secure":false}]'
+      - LAVALINK_USE_PUBLIC_FALLBACK=false
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Dữ liệu bền vững nằm trong volume, không mất khi build lại image
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+    ports:
+      - '${PORT:-8080}:8080'
+    networks:
+      - musicbot
+
+networks:
+  musicbot:
+    driver: bridge
+
+volumes:
+  lavalink-plugins:

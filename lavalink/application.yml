@@ -1,0 +1,86 @@
+# ============================================================
+# Cấu hình Lavalink v4 cho docker-compose.yml
+#
+# Biến môi trường được truyền từ docker-compose:
+#   LAVALINK_SERVER_PASSWORD, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+#
+# LƯU Ý: phiên bản plugin có thể đã có bản mới hơn — kiểm tra tại
+#   https://github.com/topi314/LavaSrc/releases
+# và cập nhật `dependency` bên dưới cho phù hợp.
+# ============================================================
+
+server:
+    port: 2333
+    address: 0.0.0.0
+
+lavalink:
+    plugins:
+        # LavaSrc: hỗ trợ Spotify / Apple Music / Deezer... (bắc cầu sang YouTube)
+        - dependency: 'com.github.topi314.lavasrc:lavasrc-plugin:4.3.0'
+          repository: 'https://maven.lavalink.dev/releases'
+
+    server:
+        password: '${LAVALINK_SERVER_PASSWORD:youshallnotpass}'
+        sources:
+            # Tắt nguồn YouTube gốc của Lavalink vì thường xuyên bị 403;
+            # LavaSrc sẽ bắc cầu qua ytsearch/ytmsearch.
+            youtube: false
+            bandcamp: true
+            soundcloud: true
+            twitch: true
+            vimeo: true
+            http: true
+            local: false
+
+        filters:
+            volume: true
+            equalizer: true
+            karaoke: true
+            timescale: true
+            tremolo: true
+            vibrato: true
+            distortion: true
+            rotation: true
+            channelMix: true
+            lowPass: true
+
+        bufferDurationMs: 400
+        frameBufferDurationMs: 5000
+        opusEncodingQuality: 10
+        resamplingQuality: LOW
+        trackStuckThresholdMs: 10000
+        useSeekGhosting: true
+        youtubePlaylistLoadLimit: 6
+        playerUpdateInterval: 5
+        youtubeSearchEnabled: true
+        soundcloudSearchEnabled: true
+        gc-warnings: true
+
+plugins:
+    lavasrc:
+        # Thứ tự thử phân giải khi tìm theo từ khoá / ISRC
+        providers:
+            - 'ytmsearch:"%ISRC%"'
+            - 'ytsearch:"%ISRC%"'
+            - 'ytmsearch:%QUERY%'
+            - 'ytsearch:%QUERY%'
+
+        sources:
+            spotify: true
+            applemusic: false
+            deezer: false
+            yandexmusic: false
+            flowerytts: false
+            youtube: true
+
+        spotify:
+            clientId: '${SPOTIFY_CLIENT_ID:}'
+            clientSecret: '${SPOTIFY_CLIENT_SECRET:}'
+            countryCode: VN
+            playlistLoadLimit: 6
+            albumLoadLimit: 6
+
+metrics:
+    prometheus:
+        enabled: false
+        endpoint: /metrics
