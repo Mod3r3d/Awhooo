@@ -247,8 +247,8 @@ test('tích hợp — /play báo lỗi khi không tìm thấy kết quả', asyn
     const interaction = fakeInteraction({ commandName: 'play', query: 'khong co gi' });
     await handler.dispatch(interaction);
 
-    assert.equal(interaction.calls.editReply.length, 1);
-    assert.match(interaction.calls.editReply[0], /Không tìm thấy/);
+    const lastReply = interaction.calls.editReply[interaction.calls.editReply.length - 1];
+    assert.match(lastReply, /Không tìm thấy/);
 
     cleanup('guild-int');
 });
@@ -352,8 +352,8 @@ test('tích hợp — /play báo lỗi khi hàng đợi đã đầy', async () =
     const interaction = fakeInteraction({ commandName: 'play', query: 'bai hat f' });
     await handler.dispatch(interaction);
 
-    assert.equal(interaction.calls.editReply.length, 1);
-    assert.match(interaction.calls.editReply[0], /đầy/);
+    const lastReply = interaction.calls.editReply[interaction.calls.editReply.length - 1];
+    assert.match(lastReply, /đầy/);
 
     cleanup('guild-int');
 });

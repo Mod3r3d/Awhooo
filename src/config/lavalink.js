@@ -21,22 +21,28 @@ const log = createLogger('LavalinkConfig');
 /** Danh sách node công khai miễn phí — chỉ phù hợp để thử nghiệm */
 const PUBLIC_FALLBACK_NODES = [
     {
-        name: 'Public-1',
+        name: 'Nazha_SSL',
         url: process.env.LAVALINK_PUBLIC_1_URL || 'lavalink.nazha.online:443',
         auth: process.env.LAVALINK_PUBLIC_1_AUTH || 'nazhafreelava',
         secure: true
     },
     {
-        name: 'Public-2',
-        url: process.env.LAVALINK_PUBLIC_2_URL || 'lava-v4.millohost.my.id:443',
-        auth: process.env.LAVALINK_PUBLIC_2_AUTH || 'https://discord.gg/mjS5J2K3ep',
+        name: 'Jirayu_SSL',
+        url: process.env.LAVALINK_PUBLIC_2_URL || 'lavalink.jirayu.net:443',
+        auth: process.env.LAVALINK_PUBLIC_2_AUTH || 'youshallnotpass',
         secure: true
     },
     {
-        name: 'Public-3',
-        url: process.env.LAVALINK_PUBLIC_3_URL || 'nodelink.gdjkhp.com:443',
-        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'youshallnotpass',
+        name: 'Millohost_SSL',
+        url: process.env.LAVALINK_PUBLIC_3_URL || 'lava-v4.millohost.my.id:443',
+        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'https://discord.gg/mjS5J2K3ep',
         secure: true
+    },
+    {
+        name: 'Kasawa_Direct',
+        url: process.env.LAVALINK_PUBLIC_4_URL || 'lava2.kasawa.pro:2334',
+        auth: process.env.LAVALINK_PUBLIC_4_AUTH || 'youshallnotpass',
+        secure: false
     }
 ];
 
