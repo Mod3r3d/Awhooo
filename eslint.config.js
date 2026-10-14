@@ -19,7 +19,16 @@ module.exports = [
         },
         rules: {
             // Biến/đối số không dùng là cảnh báo, cho phép tiền tố _ để bỏ qua
-            'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+            'no-unused-vars': [
+                'warn',
+                {
+                    argsIgnorePattern: '^_',
+                    varsIgnorePattern: '^_',
+                    caughtErrorsIgnorePattern: '^_'
+                }
+            ],
+            // Cho phép catch rỗng khi dọn dẹp tài nguyên
+            'no-empty': ['error', { allowEmptyCatch: true }],
             // Bot ghi log ra console là hợp lệ ở tầng bootstrap
             'no-console': 'off',
             // Cho phép == null để bắt cả null và undefined

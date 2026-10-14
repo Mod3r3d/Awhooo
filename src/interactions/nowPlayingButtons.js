@@ -1,77 +1,15 @@
-/**
- * nowPlayingButtons — Xử lý toàn bộ nút trên bảng Now Playing (tiền tố `np_`).
- *
- * Bảng có thể là ephemeral (chỉ người gọi lệnh thấy) hoặc công khai (do
- * `/nowplaying` tạo). Mọi nút đều yêu cầu người bấm ở cùng kênh thoại với bot.
- */
-
-const { MessageFlags } = require('discord.js');
-
-const { t } = require('../locales');
-const NowPlayingUI = require('../services/ui/NowPlayingUI');
-const QueueUI = require('../services/ui/QueueUI');
-const { getState } = require('../services/player/PlayerState');
-const { respondEphemeral } = require('../utils/reply');
-const { isEphemeralMessage } = require('../utils/interactions');
-
-/** Bước thay đổi âm lượng mỗi lần bấm nút */
-const VOLUME_STEP = 10;
-
-/** Giới hạn âm lượng */
-const VOLUME_MIN = 1;
-const VOLUME_MAX = 200;
-
-/**
- * Vẽ lại bảng Now Playing ngay trên tin nhắn chứa nút vừa bấm.
- * @param {import('discord.js').ButtonInteraction} interaction
- * @param {object} player - Kazagumo player
- * @param {import('../services/player/PlayerState').PlayerState} state
- */
-async function refreshPanel(interaction, player, state) {
-    const track = player.queue.current;
-    if (!track) return;
-
-    const { embed, components } = NowPlayingUI.create(player, track, state);
-    await interaction
-        .editReply({
-            content: state.panelNote || '',
-            embeds: [embed],
-            components
-        })
-        .catch(() => {});
-}
-
-/**
- * Xử lý nút bấm trên bảng Now Playing.
- * @param {import('discord.js').ButtonInteraction} interaction
- * @param {object} ctx - Ngữ cảnh bot
- * @param {string} customId
- */
 async function handle(interaction, ctx, customId) {
     const player = ctx.manager.players.get(interaction.guild.id);
 
-    // Nút dừng luôn được phép thực thi ngay lập tức để giải phóng tài nguyên
-    if (customId === 'np_stop') {
-        if (player) {
-            await ctx.playerService.stop(player);
-        } else {
-            try { await ctx.manager.destroyPlayer(interaction.guild.id); } catch (_) {}
-            try { await ctx.manager.shoukaku.leaveVoiceChannel(interaction.guild.id); } catch (_) {}
-            try {
-                const guild = ctx.client.guilds.cache.get(interaction.guild.id);
-                if (guild?.members?.me?.voice?.channelId) {
-                    await guild.members.me.voice.disconnect();
-                }
-            } catch (_) {}
-        }
-        const embed = NowPlayingUI.createStopped('stopped');
-        return interaction.update({ content: '', embeds: [embed], components: [] }).catch(() => {
-            return interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => {});
-        });
-    }
-
     // Player đã chết hoặc không tồn tại
     if (!player) {
+        if (customId === 'np_stop') {
+            await ctx.playerService.forceCleanupVoice(interaction.guild.id);
+            const embed = NowPlayingUI.createStopped('stopped');
+            return interaction.update({ content: '', embeds: [embed], components: [] }).catch(() => {
+                return interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => { });
+            });
+        }
         return respondEphemeral(interaction, t('common.noPlayer'));
     }
 
@@ -82,8 +20,6 @@ async function handle(interaction, ctx, customId) {
 
     const state = getState(interaction.guild.id);
 
-    // Bảng ephemeral: mỗi lần bấm nút tạo một token mới (15 phút) →
-    // gia hạn để ticker tiến trình tiếp tục cập nhật được bảng này.
     if (isEphemeralMessage(interaction.message)) {
         ctx.playerService.registerEphemeralContext(interaction, player);
     }
@@ -125,6 +61,7 @@ async function handle(interaction, ctx, customId) {
         case 'np_shuffle': {
             if (player.queue.length > 1) {
                 const count = ctx.queueService.shuffle(player);
+                await refreshPanel(interaction, player, state);
                 await respondEphemeral(interaction, t('commands.shuffle.done', { count }));
             } else {
                 await respondEphemeral(interaction, t('commands.shuffle.needMore'));
@@ -157,7 +94,7 @@ async function handle(interaction, ctx, customId) {
         case 'np_stop': {
             await ctx.playerService.stop(player);
             const embed = NowPlayingUI.createStopped('stopped');
-            await interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => {});
+            await interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => { });
             return;
         }
 
@@ -165,5 +102,3 @@ async function handle(interaction, ctx, customId) {
             ctx.logger.debug(`Nút "${customId}" chưa được xử lý.`);
     }
 }
-
-module.exports = { handle, refreshPanel, prefix: 'np_' };

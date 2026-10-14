@@ -10,7 +10,7 @@ const definitions = [
 ];
 
 const meta = {
-    requiresVoice: false,
+    requiresVoice: true,
     defer: 'ephemeral'
 };
 
@@ -20,19 +20,16 @@ const meta = {
  */
 async function execute(interaction, ctx) {
     const player = ctx.player || ctx.manager.players.get(interaction.guild.id);
+    const botChannelId = ctx.client.guilds?.cache?.get(interaction.guild.id)?.members?.me?.voice?.channelId || player?.voiceId;
+
+    if (botChannelId && ctx.voiceChannel?.id !== botChannelId) {
+        return interaction.editReply(ctx.t('common.needSameVoice'));
+    }
 
     if (player) {
         await ctx.playerService.stop(player);
     } else {
-        // Giải phóng và ngắt kết nối voice ngay cả khi player không còn trong bộ nhớ
-        try { await ctx.manager.destroyPlayer(interaction.guild.id); } catch (_) {}
-        try { await ctx.manager.shoukaku.leaveVoiceChannel(interaction.guild.id); } catch (_) {}
-        try {
-            const guild = ctx.client.guilds.cache.get(interaction.guild.id);
-            if (guild?.members?.me?.voice?.channelId) {
-                await guild.members.me.voice.disconnect();
-            }
-        } catch (_) {}
+        await ctx.playerService.forceCleanupVoice(interaction.guild.id);
     }
 
     await interaction.editReply(ctx.t('commands.stop.done'));
