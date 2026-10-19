@@ -124,6 +124,8 @@ class VoicePresenceService {
             return;
         }
 
+        // FIX: Nếu không có player hợp lệ nhưng bot vẫn đang trong voice,
+        // vẫn schedule rời phòng để tránh bot ngồi lì khi node Lavalink mất kết nối
         this.schedule(guild.id);
     }
 

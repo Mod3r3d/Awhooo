@@ -67,11 +67,9 @@ function isInSameVoice(interaction, player) {
 async function handle(interaction, ctx, customId) {
     const player = ctx.manager.players.get(interaction.guild.id);
 
-    // Nút dừng cũng phải kiểm tra kênh thoại để tránh bất kỳ ai ngoài phòng cũng dừng được
+    // FIX: Nút dừng luôn hoạt động — Emergency Stop Override
+    // Cho phép bất kỳ ai trong server dừng bot khi bị treo/lỗi
     if (customId === 'np_stop') {
-        if (!isInSameVoice(interaction, player)) {
-            return respondEphemeral(interaction, t('common.needSameVoice'));
-        }
         if (player) {
             await ctx.playerService.stop(player);
         } else {

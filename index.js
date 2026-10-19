@@ -101,11 +101,11 @@ app.get('/health', (_req, res) => {
         : [];
 
     const connectedNodes = nodes.filter((node) => node.state === 'connected').length;
-    const degraded = connectedNodes === 0 && nodes.length > 0;
+    // FIX: Khi không còn node nào kết nối → trả 503 để Render tự restart container
+    const healthy = connectedNodes > 0;
 
-    // Luôn trả 200 để uptime monitor không restart bot lúc node Lavalink chưa kết nối
-    res.status(200).json({
-        status: degraded ? 'degraded' : 'ok',
+    res.status(healthy ? 200 : 503).json({
+        status: healthy ? 'ok' : 'unhealthy',
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
         memory: {
             rssMb: Math.round(memory.rss / 1024 / 1024),
@@ -185,8 +185,8 @@ manager = new Kazagumo(
     {
         moveOnDisconnect: true,
         resume: true,
-        reconnectTries: 10,
-        restTimeout: 15
+        reconnectTries: 100,
+        restTimeout: 30
     }
 );
 
@@ -270,6 +270,14 @@ manager.shoukaku.on('disconnect', (name, count) => {
     log.warn(`Node Lavalink "${name}" mất kết nối, đang thử lại (lần ${count})...`);
 });
 
+// Khi một node bị Shoukaku xóa sổ hoàn toàn (hết reconnectTries)
+manager.shoukaku.on('raw', (name, json) => {
+    // Shoukaku phát ra 'raw' với opcode close khi node bị loại bỏ hoàn toàn
+    if (json && json.op === 'event' && json.type === 'WebSocketClosedEvent') {
+        log.warn(`Node "${name}" WebSocket closed — Node Keeper sẽ xử lý kết nối lại.`);
+    }
+});
+
 manager.on('playerStart', (player, track) => {
     playerService.onTrackStart(player, track).catch((err) => log.error('Lỗi trong onTrackStart:', err));
 });
@@ -302,6 +310,16 @@ manager.on('playerResolveError', async (player, track, message) => {
 
 manager.on('playerException', async (player, data) => {
     log.error(`Lỗi phát nhạc tại guild ${player.guildId}:`, data);
+    // Thông báo lỗi vào kênh text để người dùng biết
+    try {
+        const channel = client.channels.cache.get(player.textId);
+        const trackTitle = player.queue?.current?.title || 'Không rõ';
+        if (channel) {
+            await channel.send({
+                content: `⚠️ Bài hát **${trackTitle}** gặp lỗi phát (có thể bị YouTube chặn). ${player.queue.size > 0 ? 'Đang chuyển bài tiếp theo...' : 'Dừng phát nhạc.'}`
+            }).catch(() => {});
+        }
+    } catch (_) {}
     if (player.queue.size > 0) {
         player.skip();
     } else {
@@ -311,6 +329,16 @@ manager.on('playerException', async (player, data) => {
 
 manager.on('playerStuck', async (player, track, thresholdMs) => {
     log.warn(`Bài hát "${track?.title}" bị nghẽn phát (${thresholdMs}ms) tại guild ${player.guildId}.`);
+    // Thông báo vào kênh text
+    try {
+        const channel = client.channels.cache.get(player.textId);
+        const trackTitle = track?.title || 'Không rõ';
+        if (channel) {
+            await channel.send({
+                content: `⚠️ Bài hát **${trackTitle}** bị nghẽn phát (${Math.round(thresholdMs / 1000)}s). ${player.queue.size > 0 ? 'Đang chuyển bài tiếp theo...' : 'Dừng phát nhạc.'}`
+            }).catch(() => {});
+        }
+    } catch (_) {}
     if (player.queue.size > 0) {
         player.skip();
     } else {
@@ -383,6 +411,7 @@ client.on('interactionCreate', async (interaction) => {
 // 10. Dọn dẹp định kỳ (cache, cooldown, phiên tìm kiếm)
 // ============================================================
 let maintenanceInterval = null;
+let nodeKeeperInterval = null;
 
 function startMaintenanceJobs() {
     const run = () => {
@@ -398,6 +427,68 @@ function startMaintenanceJobs() {
 
     maintenanceInterval = setInterval(run, 5 * 60 * 1000);
     if (typeof maintenanceInterval.unref === 'function') maintenanceInterval.unref();
+
+    // ── Node Keeper: tự phục hồi node Lavalink bị mất ──
+    startNodeKeeper();
+}
+
+/**
+ * Node Keeper — Quét và tự động kết nối lại các node Lavalink bị mất.
+ * Chạy mỗi 60 giây. Nếu một node đã bị Shoukaku xóa khỏi bộ nhớ
+ * (sau khi hết reconnectTries), Node Keeper sẽ gọi addNode() để đưa
+ * node trở lại hoạt động mà không cần restart bot.
+ */
+function startNodeKeeper() {
+    const NODE_KEEPER_INTERVAL_MS = 60_000; // 60 giây
+    const nodeKeeperLog = createLogger('NodeKeeper');
+
+    const run = () => {
+        if (!manager || !manager.shoukaku) return;
+
+        const currentNodeNames = new Set();
+        for (const node of manager.shoukaku.nodes.values()) {
+            currentNodeNames.add(node.name);
+        }
+
+        // Kiểm tra xem có node nào trong cấu hình ban đầu bị thiếu không
+        for (const nodeConfig of Nodes) {
+            if (!currentNodeNames.has(nodeConfig.name)) {
+                nodeKeeperLog.warn(
+                    `Node "${nodeConfig.name}" không còn trong bộ nhớ Shoukaku — đang thêm lại...`
+                );
+                try {
+                    manager.shoukaku.addNode(nodeConfig);
+                    nodeKeeperLog.info(`Đã yêu cầu kết nối lại node "${nodeConfig.name}".`);
+                } catch (err) {
+                    nodeKeeperLog.error(`Không thêm lại được node "${nodeConfig.name}":`, err.message);
+                }
+            }
+        }
+
+        // Kiểm tra các node đang ở trạng thái DISCONNECTED (state === 3)
+        for (const node of manager.shoukaku.nodes.values()) {
+            if (node.state === 3) {
+                nodeKeeperLog.warn(
+                    `Node "${node.name}" đang ở trạng thái DISCONNECTED — đang thử reconnect...`
+                );
+                try {
+                    // Xóa node cũ và thêm lại
+                    const config = Nodes.find((n) => n.name === node.name);
+                    if (config) {
+                        manager.shoukaku.removeNode(node.name);
+                        manager.shoukaku.addNode(config);
+                        nodeKeeperLog.info(`Đã yêu cầu reconnect node "${node.name}".`);
+                    }
+                } catch (err) {
+                    nodeKeeperLog.error(`Không reconnect được node "${node.name}":`, err.message);
+                }
+            }
+        }
+    };
+
+    nodeKeeperInterval = setInterval(run, NODE_KEEPER_INTERVAL_MS);
+    if (typeof nodeKeeperInterval.unref === 'function') nodeKeeperInterval.unref();
+    nodeKeeperLog.info('Node Keeper đã khởi động, quét mỗi 60 giây.');
 }
 
 // ============================================================
@@ -417,6 +508,7 @@ async function shutdown(signal) {
     }
     try {
         if (maintenanceInterval) clearInterval(maintenanceInterval);
+        if (nodeKeeperInterval) clearInterval(nodeKeeperInterval);
     } catch {
         /* bỏ qua */
     }
