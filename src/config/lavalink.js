@@ -21,22 +21,22 @@ const log = createLogger('LavalinkConfig');
 /** Danh sách node công khai miễn phí — chỉ phù hợp để thử nghiệm */
 const PUBLIC_FALLBACK_NODES = [
     {
-        name: 'Kasawa_Direct',
-        url: process.env.LAVALINK_PUBLIC_1_URL || 'lava2.kasawa.pro:2334',
-        auth: process.env.LAVALINK_PUBLIC_1_AUTH || 'youshallnotpass',
+        name: 'Millohost_SSL',
+        url: process.env.LAVALINK_PUBLIC_1_URL || 'lava-v4.millohost.my.id:443',
+        auth: process.env.LAVALINK_PUBLIC_1_AUTH || 'https://discord.gg/mjS5J2K3ep',
+        secure: true
+    },
+    {
+        name: 'HeavenCloud_Direct',
+        url: process.env.LAVALINK_PUBLIC_2_URL || 'budget-us7.bot.heavencloud.in:6706',
+        auth: process.env.LAVALINK_PUBLIC_2_AUTH || 'youshallnotpass',
         secure: false
     },
     {
-        name: 'Nazha_SSL',
-        url: process.env.LAVALINK_PUBLIC_2_URL || 'lavalink.nazha.online:443',
-        auth: process.env.LAVALINK_PUBLIC_2_AUTH || 'nazhafreelava',
-        secure: true
-    },
-    {
-        name: 'Millohost_SSL',
-        url: process.env.LAVALINK_PUBLIC_3_URL || 'lava-v4.millohost.my.id:443',
-        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'https://discord.gg/mjS5J2K3ep',
-        secure: true
+        name: 'Jirayu_Direct',
+        url: process.env.LAVALINK_PUBLIC_3_URL || 'lavalink.jirayu.net:13592',
+        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'youshallnotpass',
+        secure: false
     },
     {
         name: 'Jirayu_SSL',

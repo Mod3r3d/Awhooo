@@ -90,6 +90,7 @@ app.get('/', (_req, res) => res.send('Bot Node.js đang hoạt động!'));
 
 app.get('/health', (_req, res) => {
     const memory = process.memoryUsage();
+    const uptimeSeconds = Math.round((Date.now() - startedAt) / 1000);
 
     const nodes = manager
         ? [...manager.shoukaku.nodes.values()].map((node) => ({
@@ -101,12 +102,14 @@ app.get('/health', (_req, res) => {
         : [];
 
     const connectedNodes = nodes.filter((node) => node.state === 'connected').length;
-    // FIX: Khi không còn node nào kết nối → trả 503 để Render tự restart container
-    const healthy = connectedNodes > 0;
+    // Cho phép thời gian khởi động (60s) để bot kết nối Discord và Lavalink mà không bị Render fail deploy
+    const isWarmingUp = uptimeSeconds < 60;
+    const healthy = isWarmingUp || connectedNodes > 0;
 
     res.status(healthy ? 200 : 503).json({
         status: healthy ? 'ok' : 'unhealthy',
-        uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+        warmingUp: isWarmingUp,
+        uptimeSeconds,
         memory: {
             rssMb: Math.round(memory.rss / 1024 / 1024),
             heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024)

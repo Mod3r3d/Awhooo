@@ -107,7 +107,7 @@ class PlayerService {
     }
 
     /**
-     * Phân giải truy vấn trực tiếp qua Kazagumo (có fallback ép tiền tố tìm kiếm).
+     * Phân giải truy vấn trực tiếp qua Kazagumo (có fallback ép tiền tố tìm kiếm & multi-node fallback).
      * Trả về dữ liệu thô, KHÔNG gắn requester để cache dùng chung được.
      * @param {string} query
      * @returns {Promise<{ type: string, playlistName?: string, raws: object[] }>}
@@ -115,23 +115,48 @@ class PlayerService {
     async resolveRaw(query) {
         const empty = { type: 'SEARCH', playlistName: undefined, raws: [] };
 
+        // 1. Thử tìm kiếm mặc định qua node được Kazagumo chọn tự động
         try {
             const result = await withTimeout(this.manager.search(query), SEARCH_TIMEOUT_MS, 'Kazagumo search');
             if (result && result.tracks && result.tracks.length) return this.toRawResult(result);
         } catch (err) {
-            this.log.warn(`Tìm kiếm thất bại cho "${query}":`, err.message);
+            this.log.warn(`Tìm kiếm mặc định thất bại cho "${query}":`, err.message);
         }
 
-        if (!/^https?:\/\//i.test(query)) {
+        // 2. Nếu node tự động trả về 0 kết quả (hoặc lỗi), thử lần lượt qua các node Shoukaku đang kết nối khác
+        const connectedNodes = [...(this.manager.shoukaku?.nodes?.values() || [])].filter((n) => n.state === 1);
+        for (const node of connectedNodes) {
             try {
-                const forced = await withTimeout(
-                    this.manager.search(`ytsearch:${query}`),
+                const result = await withTimeout(
+                    this.manager.search(query, { nodeName: node.name }),
                     SEARCH_TIMEOUT_MS,
-                    'ytsearch'
+                    `Kazagumo search (${node.name})`
                 );
-                if (forced && forced.tracks && forced.tracks.length) return this.toRawResult(forced);
+                if (result && result.tracks && result.tracks.length) {
+                    this.log.info(`Tìm kiếm thành công qua node "${node.name}" cho "${query}"`);
+                    return this.toRawResult(result);
+                }
             } catch (err) {
-                this.log.warn(`Fallback ytsearch thất bại cho "${query}":`, err.message);
+                this.log.warn(`Tìm kiếm qua node "${node.name}" thất bại cho "${query}":`, err.message);
+            }
+        }
+
+        // 3. Nếu là từ khóa thông thường (không phải URL), thử ép tiền tố ytsearch qua các node kết nối
+        if (!/^https?:\/\//i.test(query)) {
+            for (const node of connectedNodes) {
+                try {
+                    const forced = await withTimeout(
+                        this.manager.search(`ytsearch:${query}`, { nodeName: node.name }),
+                        SEARCH_TIMEOUT_MS,
+                        `ytsearch (${node.name})`
+                    );
+                    if (forced && forced.tracks && forced.tracks.length) {
+                        this.log.info(`Fallback ytsearch thành công qua node "${node.name}" cho "${query}"`);
+                        return this.toRawResult(forced);
+                    }
+                } catch (err) {
+                    this.log.warn(`Fallback ytsearch qua node "${node.name}" thất bại cho "${query}":`, err.message);
+                }
             }
         }
 
