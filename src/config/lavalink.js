@@ -27,21 +27,21 @@ const PUBLIC_FALLBACK_NODES = [
         secure: true
     },
     {
-        name: 'HeavenCloud_Direct',
-        url: process.env.LAVALINK_PUBLIC_2_URL || 'budget-us7.bot.heavencloud.in:6706',
+        name: 'Vinster_SSL',
+        url: process.env.LAVALINK_PUBLIC_2_URL || 'freelavalinkvinster.in:443',
         auth: process.env.LAVALINK_PUBLIC_2_AUTH || 'youshallnotpass',
-        secure: false
+        secure: true
     },
     {
-        name: 'Jirayu_Direct',
-        url: process.env.LAVALINK_PUBLIC_3_URL || 'lavalink.jirayu.net:13592',
-        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'youshallnotpass',
-        secure: false
+        name: 'Trinium_SSL',
+        url: process.env.LAVALINK_PUBLIC_3_URL || 'lavalink-v4.triniumhost.com:443',
+        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'free',
+        secure: true
     },
     {
-        name: 'Jirayu_SSL',
-        url: process.env.LAVALINK_PUBLIC_4_URL || 'lavalink.jirayu.net:443',
-        auth: process.env.LAVALINK_PUBLIC_4_AUTH || 'youshallnotpass',
+        name: 'Serenetia_SSL',
+        url: process.env.LAVALINK_PUBLIC_4_URL || 'lavalinkv4.serenetia.com:443',
+        auth: process.env.LAVALINK_PUBLIC_4_AUTH || 'https://seretia.link/discord',
         secure: true
     }
 ];

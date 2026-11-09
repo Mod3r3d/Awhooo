@@ -188,7 +188,8 @@ manager = new Kazagumo(
     {
         moveOnDisconnect: true,
         resume: true,
-        reconnectTries: 100,
+        reconnectTries: 15,
+        reconnectInterval: 10,
         restTimeout: 30
     }
 );
