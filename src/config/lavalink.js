@@ -33,15 +33,9 @@ const PUBLIC_FALLBACK_NODES = [
         secure: true
     },
     {
-        name: 'Trinium_SSL',
-        url: process.env.LAVALINK_PUBLIC_3_URL || 'lavalink-v4.triniumhost.com:443',
-        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'free',
-        secure: true
-    },
-    {
         name: 'Serenetia_SSL',
-        url: process.env.LAVALINK_PUBLIC_4_URL || 'lavalinkv4.serenetia.com:443',
-        auth: process.env.LAVALINK_PUBLIC_4_AUTH || 'https://seretia.link/discord',
+        url: process.env.LAVALINK_PUBLIC_3_URL || 'lavalinkv4.serenetia.com:443',
+        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'https://seretia.link/discord',
         secure: true
     }
 ];
