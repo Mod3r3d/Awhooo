@@ -11,7 +11,6 @@ const { t } = require('../locales');
 const NowPlayingUI = require('../services/ui/NowPlayingUI');
 const QueueUI = require('../services/ui/QueueUI');
 const { getState } = require('../services/player/PlayerState');
-const { respondEphemeral } = require('../utils/reply');
 const { isEphemeralMessage } = require('../utils/interactions');
 const { withTimeout } = require('../utils/timeout');
 const { canStop } = require('../utils/permissions');
@@ -53,9 +52,9 @@ async function refreshPanel(interaction, player, state) {
  * @returns {boolean}
  */
 function isInSameVoice(interaction, player) {
-    const memberVoice = interaction.member?.voice?.channel;
-    if (!memberVoice) return false;
-    if (player && player.voiceId && memberVoice.id !== player.voiceId) return false;
+    const memberVoiceId = interaction.member?.voice?.channelId || interaction.member?.voice?.channel?.id;
+    if (!memberVoiceId) return false;
+    if (player && player.voiceId && memberVoiceId !== player.voiceId) return false;
     return true;
 }
 
@@ -66,6 +65,9 @@ function isInSameVoice(interaction, player) {
  * @param {string} customId
  */
 async function handle(interaction, ctx, customId) {
+    // 1. Phản hồi Discord NGAY LẬP TỨC để tránh lỗi "Tương tác này không thành công" (hết hạn 3s)
+    await interaction.deferUpdate().catch(() => {});
+
     const player = ctx.manager.players.get(interaction.guild.id);
 
     // Nút dừng: kiểm tra quyền phù hợp (ở cùng voice, DJ hoặc quản trị viên)
@@ -73,7 +75,8 @@ async function handle(interaction, ctx, customId) {
         const djRoleId = ctx.storage?.getGuild?.(interaction.guild.id)?.djRoleId;
         const perm = canStop(interaction.member, player, djRoleId);
         if (!perm.ok) {
-            return respondEphemeral(interaction, t(perm.error));
+            await interaction.followUp({ content: t(perm.error), flags: MessageFlags.Ephemeral }).catch(() => {});
+            return;
         }
 
         if (player) {
@@ -82,18 +85,19 @@ async function handle(interaction, ctx, customId) {
             await ctx.playerService.forceCleanupVoice(interaction.guild.id);
         }
         const embed = NowPlayingUI.createStopped('stopped');
-        return interaction.update({ content: '', embeds: [embed], components: [] }).catch(() => {
-            return interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => {});
-        });
+        await interaction.editReply({ content: '', embeds: [embed], components: [] }).catch(() => {});
+        return;
     }
 
     // Player đã chết hoặc không tồn tại
     if (!player) {
-        return respondEphemeral(interaction, t('common.noPlayer'));
+        await interaction.followUp({ content: t('common.noPlayer'), flags: MessageFlags.Ephemeral }).catch(() => {});
+        return;
     }
 
     if (!isInSameVoice(interaction, player)) {
-        return respondEphemeral(interaction, t('common.needSameVoice'));
+        await interaction.followUp({ content: t('common.needSameVoice'), flags: MessageFlags.Ephemeral }).catch(() => {});
+        return;
     }
 
     const state = getState(interaction.guild.id);
@@ -103,13 +107,11 @@ async function handle(interaction, ctx, customId) {
     }
     state.touchPanel();
 
-    await interaction.deferUpdate();
-
     switch (customId) {
         case 'np_previous': {
             const result = await ctx.playerService.previous(player);
             if (!result.ok) {
-                await respondEphemeral(interaction, t(result.error));
+                await interaction.followUp({ content: t(result.error), flags: MessageFlags.Ephemeral }).catch(() => {});
                 return;
             }
             await refreshPanel(interaction, player, state);
@@ -125,7 +127,9 @@ async function handle(interaction, ctx, customId) {
 
         case 'np_skip': {
             const ok = ctx.playerService.skip(player);
-            if (!ok) await respondEphemeral(interaction, t('common.noPlaying'));
+            if (!ok) {
+                await interaction.followUp({ content: t('common.noPlaying'), flags: MessageFlags.Ephemeral }).catch(() => {});
+            }
             return;
         }
 
@@ -140,9 +144,13 @@ async function handle(interaction, ctx, customId) {
             if (player.queue.length > 1) {
                 const count = ctx.queueService.shuffle(player);
                 await refreshPanel(interaction, player, state);
-                await respondEphemeral(interaction, t('commands.shuffle.done', { count }));
+                await interaction
+                    .followUp({ content: t('commands.shuffle.done', { count }), flags: MessageFlags.Ephemeral })
+                    .catch(() => {});
             } else {
-                await respondEphemeral(interaction, t('commands.shuffle.needMore'));
+                await interaction
+                    .followUp({ content: t('commands.shuffle.needMore'), flags: MessageFlags.Ephemeral })
+                    .catch(() => {});
             }
             return;
         }
@@ -169,7 +177,7 @@ async function handle(interaction, ctx, customId) {
 
         case 'np_queue': {
             const { embed, components } = QueueUI.create(player, 1);
-            await interaction.followUp({ embeds: [embed], components, flags: MessageFlags.Ephemeral });
+            await interaction.followUp({ embeds: [embed], components, flags: MessageFlags.Ephemeral }).catch(() => {});
             return;
         }
 

@@ -16,7 +16,9 @@ const PAGE_INDICATOR = 'queue_page_indicator';
  * @param {string} customId
  */
 async function handle(interaction, ctx, customId) {
-    if (customId === PAGE_INDICATOR) return;
+    if (customId === PAGE_INDICATOR) {
+        return interaction.deferUpdate().catch(() => {});
+    }
 
     const player = ctx.manager.players.get(interaction.guild.id);
     if (!player) {

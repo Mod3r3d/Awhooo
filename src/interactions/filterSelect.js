@@ -2,10 +2,10 @@
  * filterSelect — Xử lý menu chọn bộ lọc âm thanh trên bảng Now Playing.
  */
 
+const { MessageFlags } = require('discord.js');
 const { t } = require('../locales');
 const NowPlayingUI = require('../services/ui/NowPlayingUI');
 const { getState } = require('../services/player/PlayerState');
-const { respondEphemeral } = require('../utils/reply');
 const { isEphemeralMessage } = require('../utils/interactions');
 const { refreshPanel } = require('./nowPlayingButtons');
 
@@ -15,14 +15,19 @@ const { refreshPanel } = require('./nowPlayingButtons');
  * @param {object} ctx - Ngữ cảnh bot
  */
 async function handle(interaction, ctx) {
+    // 1. Luôn xác nhận nhận lệnh ngay lập tức để không bị timeout 3s
+    await interaction.deferUpdate().catch(() => {});
+
     const player = ctx.manager.players.get(interaction.guild.id);
     if (!player) {
-        return respondEphemeral(interaction, t('common.noPlayer'));
+        return interaction.followUp({ content: t('common.noPlayer'), flags: MessageFlags.Ephemeral }).catch(() => {});
     }
 
-    const memberVoice = interaction.member?.voice?.channel;
-    if (!memberVoice || memberVoice.id !== player.voiceId) {
-        return respondEphemeral(interaction, t('common.needSameVoice'));
+    const memberVoiceId = interaction.member?.voice?.channelId || interaction.member?.voice?.channel?.id;
+    if (!memberVoiceId || memberVoiceId !== player.voiceId) {
+        return interaction
+            .followUp({ content: t('common.needSameVoice'), flags: MessageFlags.Ephemeral })
+            .catch(() => {});
     }
 
     const name = interaction.values[0];
@@ -34,11 +39,11 @@ async function handle(interaction, ctx) {
     }
     state.touchPanel();
 
-    await interaction.deferUpdate();
-
     const result = await ctx.playerService.setFilter(player, name);
     if (!result.ok) {
-        await respondEphemeral(interaction, t('commands.filter.invalid', { name }));
+        await interaction
+            .followUp({ content: t('commands.filter.invalid', { name }), flags: MessageFlags.Ephemeral })
+            .catch(() => {});
         return;
     }
 

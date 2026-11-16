@@ -14,16 +14,32 @@ const { PermissionFlagsBits } = require('discord.js');
  * @returns {boolean}
  */
 function hasElevatedPermission(member, djRoleId = null) {
-    if (!member || !member.permissions) return false;
-    if (
-        member.permissions.has(PermissionFlagsBits.Administrator) ||
-        member.permissions.has(PermissionFlagsBits.ManageGuild)
-    ) {
+    if (!member) return false;
+
+    // 1. Chủ Server (Owner) luôn có quyền cao nhất
+    if (member.guild?.ownerId && member.guild.ownerId === member.id) {
         return true;
     }
-    if (djRoleId && member.roles?.cache?.has(djRoleId)) {
+
+    // 2. Quyền Administrator hoặc ManageGuild
+    if (member.permissions) {
+        try {
+            const perms =
+                typeof member.permissions.has === 'function'
+                    ? member.permissions
+                    : new PermissionFlagsBits(BigInt(member.permissions));
+            if (perms.has(PermissionFlagsBits.Administrator) || perms.has(PermissionFlagsBits.ManageGuild)) {
+                return true;
+            }
+        } catch {}
+    }
+
+    // 3. Role DJ theo cấu hình ID
+    if (djRoleId && member.roles?.cache?.has?.(djRoleId)) {
         return true;
     }
+
+    // 4. Role mang tên "DJ"
     if (member.roles?.cache) {
         const cache = member.roles.cache;
         if (typeof cache.some === 'function') {
@@ -47,14 +63,14 @@ function hasElevatedPermission(member, djRoleId = null) {
 function canStop(member, player, djRoleId = null) {
     if (!member) return { ok: false, error: 'common.noPermission' };
 
-    // 1. Quản trị viên hoặc DJ luôn có quyền dừng từ xa
+    // 1. Quản trị viên, Chủ Server hoặc DJ luôn có quyền dừng từ xa
     if (hasElevatedPermission(member, djRoleId)) {
         return { ok: true };
     }
 
     // 2. Nếu người dùng ở cùng kênh thoại với bot -> có quyền dừng
     if (player && player.voiceId) {
-        const memberVoiceId = member.voice?.channel?.id;
+        const memberVoiceId = member.voice?.channelId || member.voice?.channel?.id;
         if (memberVoiceId && memberVoiceId === player.voiceId) {
             return { ok: true };
         }
@@ -67,30 +83,30 @@ function canStop(member, player, djRoleId = null) {
 /**
  * Kiểm tra xem member có ở trong voice channel hay không.
  * @param {import('discord.js').GuildMember} member
- * @returns {{ ok: boolean, channel?: import('discord.js').VoiceBasedChannel, error?: string }}
+ * @returns {{ ok: boolean, channel?: import('discord.js').VoiceBasedChannel, channelId?: string, error?: string }}
  */
 function checkVoiceChannel(member) {
-    const channel = member?.voice?.channel;
-    if (!channel) {
+    const channelId = member?.voice?.channelId || member?.voice?.channel?.id;
+    if (!channelId) {
         return { ok: false, error: 'common.needVoice' };
     }
-    return { ok: true, channel };
+    return { ok: true, channel: member.voice?.channel, channelId };
 }
 
 /**
  * Kiểm tra xem member có ở CÙNG voice channel với bot hay không.
  * @param {import('discord.js').GuildMember} member
  * @param {object} player - Kazagumo player
- * @returns {{ ok: boolean, channel?: import('discord.js').VoiceBasedChannel, error?: string }}
+ * @returns {{ ok: boolean, channel?: import('discord.js').VoiceBasedChannel, channelId?: string, error?: string }}
  */
 function checkSameVoiceChannel(member, player) {
     const voiceCheck = checkVoiceChannel(member);
     if (!voiceCheck.ok) return voiceCheck;
 
-    if (player && player.voiceId && voiceCheck.channel.id !== player.voiceId) {
+    if (player && player.voiceId && voiceCheck.channelId !== player.voiceId) {
         return { ok: false, error: 'common.needSameVoice' };
     }
-    return { ok: true, channel: voiceCheck.channel };
+    return { ok: true, channel: voiceCheck.channel, channelId: voiceCheck.channelId };
 }
 
 /**
