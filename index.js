@@ -161,10 +161,13 @@ app.get('/health/diagnostics', (_req, res) => {
     });
 });
 
-// Giữ lại /health để tương thích ngược với cấu hình Render / Uptime robot
+// Giữ lại /health để phục vụ Render Health Check & Uptime Robot (luôn trả 200 khi tiến trình Node sống để deploy tức thì)
 app.get('/health', (_req, res) => {
     const { isReady, payload } = buildHealthStatus();
-    res.status(isReady ? 200 : 503).json(payload);
+    res.status(200).json({
+        ...payload,
+        status: isReady ? 'ok' : 'initializing'
+    });
 });
 
 const server = app.listen(process.env.PORT || 8080, '0.0.0.0', () => {

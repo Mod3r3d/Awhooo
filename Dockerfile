@@ -37,8 +37,8 @@ USER node
 
 EXPOSE 8080
 
-# Docker tự khởi động lại container nếu /health không phản hồi
+# Docker tự kiểm tra container còn sống qua endpoint /health/live
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD wget -q --spider http://127.0.0.1:8080/health || exit 1
+    CMD wget -q --spider http://127.0.0.1:8080/health/live || exit 1
 
 CMD ["node", "index.js"]
