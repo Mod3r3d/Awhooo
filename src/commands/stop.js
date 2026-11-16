@@ -2,6 +2,8 @@
  * /stop — Dừng nhạc, xóa hàng đợi, ngắt kết nối.
  */
 
+const { canStop } = require('../utils/permissions');
+
 const definitions = [
     {
         name: 'stop',
@@ -20,9 +22,12 @@ const meta = {
  */
 async function execute(interaction, ctx) {
     const player = ctx.player || ctx.manager.players.get(interaction.guild.id);
+    const djRoleId = ctx.storage?.getGuild?.(interaction.guild.id)?.djRoleId;
 
-    // FIX: Cho phép /stop hoạt động trong mọi tình huống (Emergency Stop Override)
-    // Không yêu cầu người dùng phải ở cùng voice channel với bot
+    const perm = canStop(interaction.member, player, djRoleId);
+    if (!perm.ok) {
+        return interaction.editReply(ctx.t(perm.error));
+    }
 
     if (player) {
         await ctx.playerService.stop(player);

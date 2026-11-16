@@ -21,21 +21,33 @@ const log = createLogger('LavalinkConfig');
 /** Danh sách node công khai miễn phí — chỉ phù hợp để thử nghiệm */
 const PUBLIC_FALLBACK_NODES = [
     {
+        name: 'Serenetia_SSL',
+        url: process.env.LAVALINK_PUBLIC_1_URL || 'lavalinkv4.serenetia.com:443',
+        auth: process.env.LAVALINK_PUBLIC_1_AUTH || 'BatuManaBisa',
+        secure: true
+    },
+    {
+        name: 'Serenetia_ID_SSL',
+        url: process.env.LAVALINK_PUBLIC_2_URL || 'lavalinkv4-id.serenetia.com:443',
+        auth: process.env.LAVALINK_PUBLIC_2_AUTH || 'BatuManaBisa',
+        secure: true
+    },
+    {
+        name: 'Hewkawar_SSL',
+        url: process.env.LAVALINK_PUBLIC_3_URL || 'lavalink.hewkawar.xyz:443',
+        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'HewkawArrPass',
+        secure: true
+    },
+    {
         name: 'Millohost_SSL',
-        url: process.env.LAVALINK_PUBLIC_1_URL || 'lava-v4.millohost.my.id:443',
-        auth: process.env.LAVALINK_PUBLIC_1_AUTH || 'https://discord.gg/mjS5J2K3ep',
+        url: process.env.LAVALINK_PUBLIC_4_URL || 'lava-v4.millohost.my.id:443',
+        auth: process.env.LAVALINK_PUBLIC_4_AUTH || 'https://discord.gg/mjS5J2K3ep',
         secure: true
     },
     {
         name: 'Vinster_SSL',
-        url: process.env.LAVALINK_PUBLIC_2_URL || 'freelavalinkvinster.in:443',
-        auth: process.env.LAVALINK_PUBLIC_2_AUTH || 'youshallnotpass',
-        secure: true
-    },
-    {
-        name: 'Serenetia_SSL',
-        url: process.env.LAVALINK_PUBLIC_3_URL || 'lavalinkv4.serenetia.com:443',
-        auth: process.env.LAVALINK_PUBLIC_3_AUTH || 'https://seretia.link/discord',
+        url: process.env.LAVALINK_PUBLIC_5_URL || 'freelavalinkvinster.in:443',
+        auth: process.env.LAVALINK_PUBLIC_5_AUTH || 'youshallnotpass',
         secure: true
     }
 ];

@@ -46,6 +46,19 @@ class StorageService {
         this.flushTimer = null;
         this.dirty = false;
         this.ready = false;
+
+        this.mutationVersion = 0;
+        this.savedVersion = 0;
+        this.isFlushing = false;
+        this.flushPromise = null;
+    }
+
+    /**
+     * Đánh dấu dữ liệu đã thay đổi với version mới.
+     */
+    markDirty() {
+        this.mutationVersion++;
+        this.dirty = true;
     }
 
     /**
@@ -100,6 +113,7 @@ class StorageService {
      */
     setGuild(guildId, patch) {
         this.data.guilds[guildId] = { ...this.getGuild(guildId), ...patch };
+        this.markDirty();
         this.scheduleFlush();
     }
 
@@ -120,6 +134,7 @@ class StorageService {
     removeGuild(guildId) {
         if (this.data.guilds[guildId]) {
             delete this.data.guilds[guildId];
+            this.markDirty();
             this.scheduleFlush();
         }
     }
@@ -138,32 +153,61 @@ class StorageService {
     }
 
     /**
-     * Ghi dữ liệu xuống đĩa ngay lập tức (ghi nguyên tử).
+     * Ghi dữ liệu xuống đĩa ngay lập tức (ghi nguyên tử + tuần tự hóa flush).
      * @returns {Promise<boolean>} true nếu có ghi thành công
      */
     async flush() {
         if (!this.ready || !this.dirty) return false;
+
+        // Nếu một flush khác đang ghi, đợi flush đó hoàn tất
+        if (this.isFlushing && this.flushPromise) {
+            await this.flushPromise;
+            if (!this.dirty) return true;
+        }
 
         if (this.flushTimer) {
             clearTimeout(this.flushTimer);
             this.flushTimer = null;
         }
 
-        try {
-            const payload = JSON.stringify({ version: SCHEMA_VERSION, guilds: this.data.guilds }, null, 2);
-            await fs.writeFile(this.tmpPath, payload, 'utf8');
-            await fs.rename(this.tmpPath, this.filePath);
-            this.dirty = false;
-            return true;
-        } catch (err) {
-            log.error('Không ghi được file dữ liệu:', err);
-            return false;
-        }
+        this.isFlushing = true;
+        const currentVersion = this.mutationVersion;
+        const payload = JSON.stringify({ version: SCHEMA_VERSION, guilds: this.data.guilds }, null, 2);
+        const uniqueTmpPath = `${this.filePath}.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`;
+
+        this.flushPromise = (async () => {
+            try {
+                await fs.writeFile(uniqueTmpPath, payload, 'utf8');
+                await fs.rename(uniqueTmpPath, this.filePath);
+                this.savedVersion = currentVersion;
+                // Chỉ xóa dirty nếu trong quá trình ghi không có mutation mới hơn
+                if (this.mutationVersion === currentVersion) {
+                    this.dirty = false;
+                } else {
+                    this.scheduleFlush();
+                }
+                return true;
+            } catch (err) {
+                log.error('Không ghi được file dữ liệu:', err);
+                await fs.unlink(uniqueTmpPath).catch(() => {});
+                return false;
+            } finally {
+                this.isFlushing = false;
+            }
+        })();
+
+        return this.flushPromise;
     }
 
     /** Ghi nốt dữ liệu còn tồn rồi dọn timer (dùng khi shutdown). */
     async close() {
-        await this.flush();
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
+        while (this.dirty || this.isFlushing) {
+            await this.flush();
+        }
     }
 }
 

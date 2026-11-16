@@ -14,6 +14,7 @@
     "userQueueFull": "❌ Bạn đã thêm **{count}** bài vào hàng đợi (giới hạn **{max}** bài mỗi người).",
     "playlistTrimmed": "ℹ️ Playlist có **{total}** bài, chỉ nạp **{loaded}** bài đầu tiên.",
     "onlyRequester": "❌ Chỉ **{name}** (người yêu cầu bài hát) mới điều khiển được bảng này.",
+    "noPermission": "❌ Bạn không có quyền thực hiện thao tác này (cần ở cùng kênh thoại hoặc có quyền Quản lý Server/DJ).",
     "panelExpired": "⌛ Bảng điều khiển đã hết hạn. Dùng `/nowplaying` để mở lại."
   },
   "commands": {

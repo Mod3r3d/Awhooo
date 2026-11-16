@@ -43,6 +43,27 @@ class CooldownService {
     }
 
     /**
+     * Giữ chỗ cooldown ngay lập tức để chống race condition.
+     * Trả về { ok: true, release: Function } nếu được phép thực thi,
+     * hoặc { ok: false, retryAfterMs: number } nếu đang trong thời gian chờ.
+     * @param {string} key
+     * @param {number} durationMs
+     * @returns {{ ok: boolean, retryAfterMs?: number, release?: () => void }}
+     */
+    reserve(key, durationMs) {
+        if (!durationMs || durationMs <= 0) return { ok: true, release: () => {} };
+        const result = this.peek(key, durationMs);
+        if (!result.ok) return result;
+
+        // Tạm thời đặt cooldown để chặn các request đồng thời khác
+        this.set(key, durationMs);
+        return {
+            ok: true,
+            release: () => this.reset(key)
+        };
+    }
+
+    /**
      * Kiểm tra và đặt cooldown trong một lần gọi (dùng cho các trường hợp đơn giản).
      * @param {string} key
      * @param {number} durationMs

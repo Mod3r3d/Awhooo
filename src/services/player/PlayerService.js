@@ -23,6 +23,7 @@ const AutoplayService = require('../autoplay/AutoplayService');
 const SearchCache = require('../cache/SearchCache');
 const { createLogger } = require('../logger');
 const { withTimeout } = require('../../utils/timeout');
+const KeyedMutex = require('../../utils/KeyedMutex');
 const {
     SEARCH_TIMEOUT_MS,
     PANEL_TICK_MS,
@@ -47,6 +48,7 @@ class PlayerService {
         this.storage = deps.storage || null;
         this.searchCache = deps.searchCache || new SearchCache({ max: SEARCH_CACHE_MAX, ttlMs: SEARCH_CACHE_TTL_MS });
         this.autoplay = deps.autoplayService || new AutoplayService(manager);
+        this.mutex = new KeyedMutex();
     }
 
     // ==========================================================
@@ -114,48 +116,57 @@ class PlayerService {
      */
     async resolveRaw(query) {
         const empty = { type: 'SEARCH', playlistName: undefined, raws: [] };
+        const isUrl = /^https?:\/\//i.test(query);
+        const GLOBAL_DEADLINE = SEARCH_TIMEOUT_MS || 15000; // 15 giây tổng cho toàn bộ search
+        const NODE_TIMEOUT = 5000; // 5 giây cho mỗi node
+        const deadline = Date.now() + GLOBAL_DEADLINE;
 
-        // 1. Thử tìm kiếm mặc định qua node được Kazagumo chọn tự động
+        // 1. Thử tìm kiếm mặc định qua Kazagumo (tự động chọn node tối ưu, tương thích test mock)
         try {
-            const result = await withTimeout(this.manager.search(query), SEARCH_TIMEOUT_MS, 'Kazagumo search');
+            const remainingMs = Math.min(NODE_TIMEOUT, Math.max(1000, deadline - Date.now()));
+            const result = await withTimeout(this.manager.search(query), remainingMs, 'Kazagumo search');
             if (result && result.tracks && result.tracks.length) return this.toRawResult(result);
         } catch (err) {
             this.log.warn(`Tìm kiếm mặc định thất bại cho "${query}":`, err.message);
         }
 
-        // 2. Nếu node tự động trả về 0 kết quả (hoặc lỗi), thử lần lượt qua các node Shoukaku đang kết nối khác
+        // 2. Nếu tìm kiếm mặc định thất bại hoặc 0 kết quả, thử qua các node Shoukaku đang kết nối
         const connectedNodes = [...(this.manager.shoukaku?.nodes?.values() || [])].filter((n) => n.state === 1);
-        for (const node of connectedNodes) {
-            try {
-                const result = await withTimeout(
-                    this.manager.search(query, { nodeName: node.name }),
-                    SEARCH_TIMEOUT_MS,
-                    `Kazagumo search (${node.name})`
-                );
-                if (result && result.tracks && result.tracks.length) {
-                    this.log.info(`Tìm kiếm thành công qua node "${node.name}" cho "${query}"`);
-                    return this.toRawResult(result);
-                }
-            } catch (err) {
-                this.log.warn(`Tìm kiếm qua node "${node.name}" thất bại cho "${query}":`, err.message);
-            }
+        if (!connectedNodes.length) {
+            return empty;
         }
 
-        // 3. Nếu là từ khóa thông thường (không phải URL), thử ép tiền tố ytsearch qua các node kết nối
-        if (!/^https?:\/\//i.test(query)) {
-            for (const node of connectedNodes) {
+        // Thử tối đa 3 node ngẫu nhiên
+        const candidateNodes = connectedNodes.sort(() => Math.random() - 0.5).slice(0, 3);
+
+        const strategies = [];
+        if (!isUrl) {
+            strategies.push(`ytsearch:${query}`);
+            strategies.push(`ytmsearch:${query}`);
+            strategies.push(`scsearch:${query}`);
+        } else {
+            strategies.push(query);
+        }
+
+        for (const searchQuery of strategies) {
+            if (Date.now() >= deadline) break;
+
+            for (const node of candidateNodes) {
+                if (Date.now() >= deadline) break;
+                const remainingMs = Math.min(NODE_TIMEOUT, Math.max(1000, deadline - Date.now()));
+
                 try {
-                    const forced = await withTimeout(
-                        this.manager.search(`ytsearch:${query}`, { nodeName: node.name }),
-                        SEARCH_TIMEOUT_MS,
-                        `ytsearch (${node.name})`
+                    const result = await withTimeout(
+                        this.manager.search(searchQuery, { nodeName: node.name }),
+                        remainingMs,
+                        `search ${node.name}`
                     );
-                    if (forced && forced.tracks && forced.tracks.length) {
-                        this.log.info(`Fallback ytsearch thành công qua node "${node.name}" cho "${query}"`);
-                        return this.toRawResult(forced);
+                    if (result && result.tracks && result.tracks.length) {
+                        this.log.info(`Fallback "${searchQuery}" thành công qua node "${node.name}"`);
+                        return this.toRawResult(result);
                     }
                 } catch (err) {
-                    this.log.warn(`Fallback ytsearch qua node "${node.name}" thất bại cho "${query}":`, err.message);
+                    this.log.warn(`Search "${searchQuery}" qua node "${node.name}" thất bại:`, err.message);
                 }
             }
         }
@@ -193,55 +204,57 @@ class PlayerService {
      * @returns {Promise<object>} Kazagumo player
      */
     async getOrCreatePlayer({ guildId, textId, voiceId }) {
-        const state = getState(guildId);
-        const stored = this.storage ? this.storage.getGuild(guildId) : null;
+        return this.mutex.runExclusive(guildId, async () => {
+            const state = getState(guildId);
+            const stored = this.storage ? this.storage.getGuild(guildId) : null;
 
-        if (stored && !state.restored) {
-            state.restored = true;
-            if (stored.repeatMode) state.setRepeatMode(stored.repeatMode);
-            if (stored.filter && FilterService.isValid(stored.filter)) {
-                state.filter = FilterService.normalise(stored.filter);
-                state.filterNeedsApply = state.filter !== FilterService.default;
+            if (stored && !state.restored) {
+                state.restored = true;
+                if (stored.repeatMode) state.setRepeatMode(stored.repeatMode);
+                if (stored.filter && FilterService.isValid(stored.filter)) {
+                    state.filter = FilterService.normalise(stored.filter);
+                    state.filterNeedsApply = state.filter !== FilterService.default;
+                }
+                if (typeof stored.autoplay === 'boolean') state.autoplay = stored.autoplay;
+                if (!state.history.length && Array.isArray(stored.history)) state.history = stored.history;
+                this.log.debug(`Đã khôi phục cài đặt guild ${guildId}.`);
             }
-            if (typeof stored.autoplay === 'boolean') state.autoplay = stored.autoplay;
-            if (!state.history.length && Array.isArray(stored.history)) state.history = stored.history;
-            this.log.debug(`Đã khôi phục cài đặt guild ${guildId}.`);
-        }
 
-        let player = this.manager.players.get(guildId);
+            let player = this.manager.players.get(guildId);
 
-        if (player && ((player.state !== 1 && player.state !== 0) || !player.voiceId)) {
-            try {
-                await withTimeout(player.destroy(), REST_TIMEOUT_MS, 'destroy stale player');
-            } catch {
-                /* player đã chết */
+            if (player && ((player.state !== 1 && player.state !== 0) || !player.voiceId)) {
+                try {
+                    await withTimeout(player.destroy(), REST_TIMEOUT_MS, 'destroy stale player');
+                } catch {
+                    /* player đã chết */
+                }
+                this.manager.players.delete(guildId);
+                player = null;
             }
-            this.manager.players.delete(guildId);
-            player = null;
-        }
 
-        if (!player) {
-            this.log.info(`Đang kết nối voice channel ${voiceId} tại guild ${guildId}...`);
-            player = await withTimeout(
-                this.manager.createPlayer({
-                    guildId,
-                    textId,
-                    voiceId,
-                    volume: stored && Number.isFinite(stored.volume) ? stored.volume : DEFAULT_VOLUME,
-                    deaf: true
-                }),
-                15000,
-                'Kết nối kênh thoại (createPlayer)'
-            );
-            this.log.info(
-                `Đã tạo player mới cho guild ${guildId} trên node "${player.shoukaku?.node?.name || 'unknown'}".`
-            );
-        } else {
-            if (textId && player.textId !== textId) player.setTextChannel(textId);
-            if (voiceId && player.voiceId !== voiceId) player.setVoiceChannel(voiceId);
-        }
+            if (!player) {
+                this.log.info(`Đang kết nối voice channel ${voiceId} tại guild ${guildId}...`);
+                player = await withTimeout(
+                    this.manager.createPlayer({
+                        guildId,
+                        textId,
+                        voiceId,
+                        volume: stored && Number.isFinite(stored.volume) ? stored.volume : DEFAULT_VOLUME,
+                        deaf: true
+                    }),
+                    15000,
+                    'Kết nối kênh thoại (createPlayer)'
+                );
+                this.log.info(
+                    `Đã tạo player mới cho guild ${guildId} trên node "${player.shoukaku?.node?.name || 'unknown'}".`
+                );
+            } else {
+                if (textId && player.textId !== textId) player.setTextChannel(textId);
+                if (voiceId && player.voiceId !== voiceId) player.setVoiceChannel(voiceId);
+            }
 
-        return player;
+            return player;
+        });
     }
 
     /**
@@ -274,10 +287,16 @@ class PlayerService {
                 await withTimeout(player.play(), REST_TIMEOUT_MS, 'player.play()');
             } catch (err) {
                 this.log.error('Lỗi khi bắt đầu phát trong enqueue:', err);
+                // Rollback: Xóa các bài vừa thêm vào queue nếu player.play() thất bại
+                if (top) {
+                    player.queue.splice(0, accepted.length);
+                } else {
+                    player.queue.splice(player.queue.length - accepted.length, accepted.length);
+                }
                 return {
                     ok: false,
-                    added: accepted.length,
-                    trimmed: list.length - accepted.length,
+                    added: 0,
+                    trimmed: list.length,
                     error: 'common.systemError',
                     vars: null
                 };

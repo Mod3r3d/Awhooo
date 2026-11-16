@@ -14,6 +14,7 @@ const { getState } = require('../services/player/PlayerState');
 const { respondEphemeral } = require('../utils/reply');
 const { isEphemeralMessage } = require('../utils/interactions');
 const { withTimeout } = require('../utils/timeout');
+const { canStop } = require('../utils/permissions');
 
 /** Bước thay đổi âm lượng mỗi lần bấm nút */
 const VOLUME_STEP = 10;
@@ -67,9 +68,14 @@ function isInSameVoice(interaction, player) {
 async function handle(interaction, ctx, customId) {
     const player = ctx.manager.players.get(interaction.guild.id);
 
-    // FIX: Nút dừng luôn hoạt động — Emergency Stop Override
-    // Cho phép bất kỳ ai trong server dừng bot khi bị treo/lỗi
+    // Nút dừng: kiểm tra quyền phù hợp (ở cùng voice, DJ hoặc quản trị viên)
     if (customId === 'np_stop') {
+        const djRoleId = ctx.storage?.getGuild?.(interaction.guild.id)?.djRoleId;
+        const perm = canStop(interaction.member, player, djRoleId);
+        if (!perm.ok) {
+            return respondEphemeral(interaction, t(perm.error));
+        }
+
         if (player) {
             await ctx.playerService.stop(player);
         } else {

@@ -88,7 +88,16 @@ let voicePresence = null;
 
 app.get('/', (_req, res) => res.send('Bot Node.js đang hoạt động!'));
 
-app.get('/health', (_req, res) => {
+// Liveness probe: kiểm tra tiến trình Node.js còn phản hồi
+app.get('/health/live', (_req, res) => {
+    res.status(200).json({
+        status: 'live',
+        uptimeSeconds: Math.round((Date.now() - startedAt) / 1000)
+    });
+});
+
+// Hàm kiểm tra readiness dùng chung cho /health/ready và /health
+function buildHealthStatus() {
     const memory = process.memoryUsage();
     const uptimeSeconds = Math.round((Date.now() - startedAt) / 1000);
 
@@ -102,31 +111,60 @@ app.get('/health', (_req, res) => {
         : [];
 
     const connectedNodes = nodes.filter((node) => node.state === 'connected').length;
-    // Cho phép thời gian khởi động (60s) để bot kết nối Discord và Lavalink mà không bị Render fail deploy
+    const discordReady = Boolean(client?.isReady());
+    const storageReady = Boolean(storage?.ready);
     const isWarmingUp = uptimeSeconds < 60;
-    const healthy = isWarmingUp || connectedNodes > 0;
 
-    res.status(healthy ? 200 : 503).json({
-        status: healthy ? 'ok' : 'unhealthy',
-        warmingUp: isWarmingUp,
-        uptimeSeconds,
-        memory: {
-            rssMb: Math.round(memory.rss / 1024 / 1024),
-            heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024)
-        },
-        discord: {
-            ready: Boolean(client?.isReady()),
-            guilds: client?.guilds?.cache?.size ?? 0,
-            ping: client?.ws?.ping ?? null
-        },
-        players: manager ? manager.players.size : 0,
-        guildStates: getStateCount(),
-        searchCache: playerService ? playerService.searchCache.stats : null,
-        cooldownKeys: cooldown.size,
-        pendingVoiceLeave: voicePresence ? voicePresence.pendingCount : 0,
-        storage: storage ? { ready: storage.ready, guilds: Object.keys(storage.data.guilds).length } : null,
-        lavalink: nodes
+    // Sẵn sàng nhận việc khi Discord ready, Storage ready và có node Lavalink kết nối (hoặc đang khởi động)
+    const isReady = isWarmingUp || (discordReady && storageReady && connectedNodes > 0);
+
+    return {
+        isReady,
+        payload: {
+            status: isReady ? 'ok' : 'unhealthy',
+            warmingUp: isWarmingUp,
+            uptimeSeconds,
+            memory: {
+                rssMb: Math.round(memory.rss / 1024 / 1024),
+                heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024)
+            },
+            discord: {
+                ready: discordReady,
+                guilds: client?.guilds?.cache?.size ?? 0,
+                ping: client?.ws?.ping ?? null
+            },
+            players: manager ? manager.players.size : 0,
+            guildStates: getStateCount(),
+            searchCache: playerService ? playerService.searchCache.stats : null,
+            cooldownKeys: cooldown.size,
+            pendingVoiceLeave: voicePresence ? voicePresence.pendingCount : 0,
+            storage: storage ? { ready: storageReady, guilds: Object.keys(storage.data?.guilds || {}).length } : null,
+            lavalink: nodes
+        }
+    };
+}
+
+// Readiness probe: kiểm tra bot đã sẵn sàng nhận lệnh phát nhạc
+app.get('/health/ready', (_req, res) => {
+    const { isReady, payload } = buildHealthStatus();
+    res.status(isReady ? 200 : 503).json(payload);
+});
+
+// Diagnostics endpoint: thông tin chi tiết phục vụ giám sát
+app.get('/health/diagnostics', (_req, res) => {
+    const { payload } = buildHealthStatus();
+    res.status(200).json({
+        ...payload,
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch
     });
+});
+
+// Giữ lại /health để tương thích ngược với cấu hình Render / Uptime robot
+app.get('/health', (_req, res) => {
+    const { isReady, payload } = buildHealthStatus();
+    res.status(isReady ? 200 : 503).json(payload);
 });
 
 const server = app.listen(process.env.PORT || 8080, '0.0.0.0', () => {
@@ -444,7 +482,9 @@ function startMaintenanceJobs() {
  */
 function startNodeKeeper() {
     const NODE_KEEPER_INTERVAL_MS = 60_000; // 60 giây
+    const RECONNECT_COOLDOWN_MS = 120_000; // 2 phút cooldown để tránh can thiệp liên tục vào reconnect nội bộ của Shoukaku
     const nodeKeeperLog = createLogger('NodeKeeper');
+    const lastReconnectAttempt = new Map();
 
     const run = () => {
         if (!manager || !manager.shoukaku) return;
@@ -454,9 +494,15 @@ function startNodeKeeper() {
             currentNodeNames.add(node.name);
         }
 
-        // Kiểm tra xem có node nào trong cấu hình ban đầu bị thiếu không
+        const now = Date.now();
+
+        // 1. Chỉ thêm lại khi node thực sự đã bị loại khỏi danh sách quản lý của Shoukaku
         for (const nodeConfig of Nodes) {
             if (!currentNodeNames.has(nodeConfig.name)) {
+                const lastAttempt = lastReconnectAttempt.get(nodeConfig.name) || 0;
+                if (now - lastAttempt < RECONNECT_COOLDOWN_MS) continue;
+
+                lastReconnectAttempt.set(nodeConfig.name, now);
                 nodeKeeperLog.warn(
                     `Node "${nodeConfig.name}" không còn trong bộ nhớ Shoukaku — đang thêm lại...`
                 );
@@ -469,14 +515,17 @@ function startNodeKeeper() {
             }
         }
 
-        // Kiểm tra các node đang ở trạng thái DISCONNECTED (state === 3)
+        // 2. Với node ở trạng thái DISCONNECTED (state === 3) quá lâu, chỉ can thiệp sau cooldown
         for (const node of manager.shoukaku.nodes.values()) {
             if (node.state === 3) {
+                const lastAttempt = lastReconnectAttempt.get(node.name) || 0;
+                if (now - lastAttempt < RECONNECT_COOLDOWN_MS) continue;
+
+                lastReconnectAttempt.set(node.name, now);
                 nodeKeeperLog.warn(
-                    `Node "${node.name}" đang ở trạng thái DISCONNECTED — đang thử reconnect...`
+                    `Node "${node.name}" duy trì trạng thái DISCONNECTED — đang thử khởi tạo lại sau cooldown...`
                 );
                 try {
-                    // Xóa node cũ và thêm lại
                     const config = Nodes.find((n) => n.name === node.name);
                     if (config) {
                         manager.shoukaku.removeNode(node.name);

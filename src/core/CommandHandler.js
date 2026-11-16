@@ -74,18 +74,6 @@ class CommandHandler {
         const ctx = this.ctx;
         const { t } = ctx;
 
-        // --- Cooldown (chỉ kiểm tra, không đặt) ---
-        if (meta.cooldown) {
-            const result = ctx.cooldown.peek(`${interaction.user.id}:${interaction.commandName}`, meta.cooldown);
-            if (!result.ok) {
-                await respondEphemeral(
-                    interaction,
-                    t('common.cooldown', { seconds: Math.ceil(result.retryAfterMs / 1000) })
-                );
-                return { ok: false };
-            }
-        }
-
         // --- Kênh thoại ---
         let voiceChannel = null;
         if (meta.requiresVoice || meta.sameVoice) {
@@ -146,9 +134,25 @@ class CommandHandler {
         const ctx = this.ctx;
         const start = Date.now();
 
+        // 1. Atomic cooldown reservation để chống race condition khi có nhiều request đồng thời
+        let reservation = null;
+        if (meta.cooldown) {
+            reservation = ctx.cooldown.reserve(`${interaction.user.id}:${interaction.commandName}`, meta.cooldown);
+            if (!reservation.ok) {
+                await respondEphemeral(
+                    interaction,
+                    ctx.t('common.cooldown', { seconds: Math.ceil(reservation.retryAfterMs / 1000) })
+                );
+                return;
+            }
+        }
+
         try {
             const pre = await this.preflight(interaction, meta);
-            if (!pre.ok) return;
+            if (!pre.ok) {
+                if (reservation) reservation.release();
+                return;
+            }
 
             if (meta.defer === 'ephemeral') {
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -162,13 +166,9 @@ class CommandHandler {
                 voiceChannel: pre.voiceChannel
             });
 
-            // Đặt cooldown CHỈ KHI lệnh thực sự thành công
-            if (meta.cooldown) {
-                ctx.cooldown.set(`${interaction.user.id}:${interaction.commandName}`, meta.cooldown);
-            }
-
             ctx.logger.info(`[Command /${interaction.commandName}] hoàn thành sau ${Date.now() - start}ms.`);
         } catch (err) {
+            if (reservation) reservation.release();
             ctx.logger.error(`Lỗi khi chạy lệnh /${interaction.commandName} (${Date.now() - start}ms):`, err);
             await respondError(interaction, err);
         }
