@@ -43,9 +43,14 @@ class PlayerState {
         this.progressInterval = null;
 
         /**
-         * Bối cảnh interaction dùng để gửi/cập nhật bảng Now Playing dạng EPHEMERAL
-         * (chỉ người gọi lệnh nhìn thấy). Token của interaction chỉ sống 15 phút
-         * nên phải lưu kèm thời điểm hết hạn.
+         * Danh sách các phiên Now Playing dạng ephemeral theo User ID.
+         * Cho phép nhiều người dùng cùng mở bảng Now Playing mà không ghi đè nhau.
+         * @type {Map<string, { webhook: object, userId: string, channelId: string, expiresAt: number, lastInteractionAt: number }>}
+         */
+        this.ephemeralSessions = new Map();
+
+        /**
+         * Bối cảnh interaction gần nhất (giữ để tương thích ngược).
          * @type {{ webhook: object, userId: string, channelId: string, expiresAt: number }|null}
          */
         this.ephemeralContext = null;
@@ -149,36 +154,96 @@ class PlayerState {
     }
 
     /**
-     * Lưu bối cảnh interaction để gửi/cập nhật bảng Now Playing dạng ephemeral.
+     * Lưu bối cảnh interaction để gửi/cập nhật bảng Now Playing dạng ephemeral (hỗ trợ đa phiên).
      * @param {{ webhook: object, userId: string, channelId: string }} ctx
      */
     setEphemeralContext({ webhook, userId, channelId }) {
-        this.ephemeralContext = {
+        const session = {
             webhook,
             userId,
             channelId,
             // Token interaction sống 15 phút → chừa 1 phút an toàn
-            expiresAt: Date.now() + 14 * 60 * 1000
+            expiresAt: Date.now() + 14 * 60 * 1000,
+            lastInteractionAt: Date.now()
         };
+
+        if (userId) {
+            this.ephemeralSessions.set(userId, session);
+        }
+        this.ephemeralContext = session;
         this.touchPanel();
     }
 
     /**
      * Lấy bối cảnh ephemeral nếu vẫn còn hiệu lực (tự dọn nếu đã hết hạn).
+     * @param {string} [userId]
      * @returns {{ webhook: object, userId: string, channelId: string, expiresAt: number }|null}
      */
-    getEphemeralContext() {
-        if (!this.ephemeralContext) return null;
-        if (Date.now() >= this.ephemeralContext.expiresAt) {
-            this.ephemeralContext = null;
-            return null;
+    getEphemeralContext(userId = null) {
+        const now = Date.now();
+        if (userId && this.ephemeralSessions.has(userId)) {
+            const session = this.ephemeralSessions.get(userId);
+            if (now < session.expiresAt) return session;
+            this.ephemeralSessions.delete(userId);
         }
-        return this.ephemeralContext;
+
+        if (this.ephemeralContext) {
+            if (now < this.ephemeralContext.expiresAt) return this.ephemeralContext;
+            this.ephemeralContext = null;
+        }
+
+        // Lấy phiên còn hiệu lực gần nhất nếu có
+        for (const [id, session] of this.ephemeralSessions) {
+            if (now < session.expiresAt) {
+                this.ephemeralContext = session;
+                return session;
+            }
+            this.ephemeralSessions.delete(id);
+        }
+
+        return null;
     }
 
-    /** Xoá bối cảnh ephemeral (token hết hạn hoặc bảng đã bị xoá). */
-    clearEphemeralContext() {
-        this.ephemeralContext = null;
+    /**
+     * Lấy danh sách toàn bộ các phiên ephemeral còn hiệu lực trong Guild.
+     * @returns {{ webhook: object, userId: string, channelId: string, expiresAt: number }[]}
+     */
+    getAllEphemeralSessions() {
+        const now = Date.now();
+        const valid = [];
+
+        for (const [userId, session] of this.ephemeralSessions) {
+            if (now < session.expiresAt) {
+                valid.push(session);
+            } else {
+                this.ephemeralSessions.delete(userId);
+            }
+        }
+
+        // Đảm bảo ephemeralContext đơn lẻ (nếu có từ caller cũ) cũng nằm trong danh sách
+        if (this.ephemeralContext && now < this.ephemeralContext.expiresAt) {
+            if (!valid.some((s) => s.webhook === this.ephemeralContext.webhook)) {
+                valid.push(this.ephemeralContext);
+            }
+        }
+
+        return valid;
+    }
+
+    /**
+     * Xoá bối cảnh ephemeral của một user hoặc toàn bộ guild.
+     * @param {string} [userId]
+     */
+    clearEphemeralContext(userId = null) {
+        if (userId) {
+            this.ephemeralSessions.delete(userId);
+            if (this.ephemeralContext?.userId === userId) {
+                this.ephemeralContext = null;
+            }
+        } else {
+            this.ephemeralSessions.clear();
+            this.ephemeralContext = null;
+        }
     }
 
     /** Ghi nhận có tương tác với bảng Now Playing (làm mới đồng hồ đếm hết hạn nút). */

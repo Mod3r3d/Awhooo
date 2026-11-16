@@ -177,3 +177,53 @@ test('V3 Storage — flush tuần tự hóa và không nuốt thay đổi mới'
 
     await fs.rm(dir, { recursive: true, force: true });
 });
+
+// ============================================================
+// 5. Multi-Session Now Playing & Autoplay Shared Resolver
+// ============================================================
+
+const { PlayerState } = require('../src/services/player/PlayerState');
+const AutoplayService = require('../src/services/autoplay/AutoplayService');
+
+test('V3 Multi-Session — hỗ trợ nhiều phiên ephemeral độc lập theo User', () => {
+    const state = new PlayerState('g1');
+
+    state.setEphemeralContext({ webhook: { id: 'w1' }, userId: 'user1', channelId: 'c1' });
+    state.setEphemeralContext({ webhook: { id: 'w2' }, userId: 'user2', channelId: 'c1' });
+
+    const allSessions = state.getAllEphemeralSessions();
+    assert.equal(allSessions.length, 2, 'phải giữ cả 2 phiên của 2 user');
+    assert.equal(state.getEphemeralContext('user1').webhook.id, 'w1');
+    assert.equal(state.getEphemeralContext('user2').webhook.id, 'w2');
+
+    // Xóa session của user1 không làm mất session của user2
+    state.clearEphemeralContext('user1');
+    assert.equal(state.getAllEphemeralSessions().length, 1);
+    assert.equal(state.getEphemeralContext('user2').webhook.id, 'w2');
+});
+
+test('V3 Autoplay — dùng searchFn dùng chung thay vì phụ thuộc manager cứng', async () => {
+    let searchedQuery = null;
+    const mockSearchFn = async (query) => {
+        searchedQuery = query;
+        return {
+            tracks: [
+                {
+                    title: 'Bài liên quan',
+                    author: 'Ca sĩ A',
+                    identifier: 'related-1',
+                    uri: 'https://youtube.com/watch?v=related1',
+                    isStream: false
+                }
+            ]
+        };
+    };
+
+    const autoplay = new AutoplayService(mockSearchFn);
+    const seed = { title: 'Bài gốc', author: 'Ca sĩ A', identifier: 'seed-1' };
+
+    const related = await autoplay.findRelated(seed, new Set(), null);
+    assert.ok(related);
+    assert.equal(related.title, 'Bài liên quan');
+    assert.match(searchedQuery, /Ca sĩ A/);
+});

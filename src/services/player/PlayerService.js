@@ -47,7 +47,7 @@ class PlayerService {
         this.log = deps.logger || createLogger('PlayerService');
         this.storage = deps.storage || null;
         this.searchCache = deps.searchCache || new SearchCache({ max: SEARCH_CACHE_MAX, ttlMs: SEARCH_CACHE_TTL_MS });
-        this.autoplay = deps.autoplayService || new AutoplayService(manager);
+        this.autoplay = deps.autoplayService || new AutoplayService((q, r) => this.search(q, r));
         this.mutex = new KeyedMutex();
     }
 
@@ -633,18 +633,19 @@ class PlayerService {
 
         const { embed, components } = NowPlayingUI.create(player, track, state, { disabled });
 
-        const ctx = state.getEphemeralContext();
-        if (ctx) {
+        // Cập nhật tất cả các phiên ephemeral còn hiệu lực trong guild
+        const sessions = state.getAllEphemeralSessions();
+        for (const session of sessions) {
             try {
-                await ctx.webhook.editMessage('@original', {
+                await session.webhook.editMessage('@original', {
                     content: state.panelNote || '',
                     embeds: [embed],
                     components
                 });
-                state.nowPlayingChannelId = ctx.channelId;
+                state.nowPlayingChannelId = session.channelId;
             } catch (err) {
-                this.log.warn('Bảng Now Playing ephemeral không còn chỉnh sửa được:', err.message);
-                state.clearEphemeralContext();
+                this.log.debug(`Bảng Now Playing ephemeral của user ${session.userId} đã hết hạn:`, err.message);
+                state.clearEphemeralContext(session.userId);
             }
         }
 
@@ -692,9 +693,9 @@ class PlayerService {
         const embed = NowPlayingUI.createStopped(reason);
         const payload = { content: '', embeds: [embed], components: [] };
 
-        const ctx = state.getEphemeralContext();
-        if (ctx) {
-            await ctx.webhook.editMessage('@original', payload).catch(() => {});
+        const sessions = state.getAllEphemeralSessions();
+        for (const session of sessions) {
+            await session.webhook.editMessage('@original', payload).catch(() => {});
         }
 
         if (state.publicPanel) {
@@ -804,7 +805,8 @@ class PlayerService {
     async onPlayerEmpty(player) {
         const state = getState(player.guildId);
 
-        if (state.autoplay) {
+        if (state.autoplay && !state.isAutoplayRunning) {
+            state.isAutoplayRunning = true;
             const seed = state.history[0];
             if (seed) {
                 try {
@@ -822,7 +824,11 @@ class PlayerService {
                     }
                 } catch (err) {
                     this.log.warn('Autoplay thất bại, sẽ dừng player:', err.message);
+                } finally {
+                    state.isAutoplayRunning = false;
                 }
+            } else {
+                state.isAutoplayRunning = false;
             }
         }
 

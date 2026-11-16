@@ -29,14 +29,23 @@ Bot phát nhạc Discord hiện đại, mượt mà được xây dựng trên n
 - **Autoplay**: Khi hết hàng đợi, bot tự tìm và phát bài hát liên quan thay vì rời phòng.
 - **Menu chọn bài `/search`**: Hiển thị danh sách kết quả để người dùng chọn đúng bài mong muốn.
 
-### 🛡️ Ổn định & an toàn
+### 🛡️ Ổn định, an toàn & V3 Hardening
 
+- **Multi-session Ephemeral Now Playing**: Nhiều người dùng trong cùng server có thể mở và điều khiển bảng Now Playing dạng ephemeral độc lập mà không bị ghi đè lẫn nhau.
+- **Phân quyền Stop & Quản trị**: Bảo vệ an toàn cho lệnh `/stop` và nút dừng — người dùng cùng kênh thoại, Quản trị viên (`Administrator`, `ManageGuild`), Chủ Server và người có vai trò DJ đều có quyền quản trị và dừng khẩn cấp từ xa.
+- **Đồng bộ hóa Guild bằng KeyedMutex**: Khóa bất đồng bộ theo Guild ID giúp các thao tác tạo player, enqueue, skip diễn ra tuần tự, triệt tiêu hoàn toàn race condition khi nhiều người gọi lệnh cùng lúc.
+- **Hàng đợi giao dịch (Transactional Queue)**: Tự động rollback các bài hát vừa thêm nếu lệnh phát ban đầu thất bại, chống bài hát rác hoặc mồ côi trong hàng đợi.
+- **Atomic Cooldown Reservation**: Giữ chỗ cooldown ngay lập tức và hoàn trả nếu tương tác thất bại do lỗi hệ thống hoặc thiếu quyền.
+- **Health & Diagnostics Probes**:
+  - `GET /health/live`: Liveness probe cho Docker và tiến trình.
+  - `GET /health/ready`: Readiness probe nghiêm ngặt cho điều phối tải.
+  - `GET /health/diagnostics`: Thông số chi tiết (bộ nhớ, cache, player, nodes) phục vụ giám sát.
+  - `GET /health`: Luôn trả HTTP 200 cho Render deploy check tức thì.
 - **Giới hạn hàng đợi**: Tối đa 500 bài/server và 100 bài/người — chống spam và tràn bộ nhớ.
 - **Cooldown lệnh**: 3 giây giữa hai lần dùng lệnh phát nhạc của cùng một người.
 - **Tự rời kênh thoại**: Bot tự rời phòng sau 3 phút nếu không còn ai nghe.
-- **Lưu trữ bền vững**: Chế độ lặp, âm lượng, bộ lọc, autoplay và lịch sử phát nhạc được lưu xuống đĩa — không mất khi bot khởi động lại.
+- **Lưu trữ bền vững**: Chế độ lặp, âm lượng, bộ lọc, autoplay và lịch sử phát nhạc được lưu xuống đĩa bằng cơ chế serialized snapshot flush nguyên tử — không mất dữ liệu khi bot khởi động lại.
 - **Logging có cấu trúc**: Log chia theo mức (`error`/`warn`/`info`/`debug`), xuất JSON ở production để dễ thu thập.
-- **Health check nâng cao**: `/health` trả về trạng thái từng node Lavalink, số player, RAM, uptime, thống kê cache.
 
 ### 🧪 Chất lượng mã nguồn
 

@@ -45,10 +45,32 @@ function pickRelated(tracks, excludedKeys) {
 
 class AutoplayService {
     /**
-     * @param {import('kazagumo').Kazagumo} manager - Kazagumo manager
+     * @param {import('kazagumo').Kazagumo|Function} managerOrSearchFn - Kazagumo manager hoặc hàm search resolver dùng chung
      */
-    constructor(manager) {
-        this.manager = manager;
+    constructor(managerOrSearchFn) {
+        if (typeof managerOrSearchFn === 'function') {
+            this.searchFn = managerOrSearchFn;
+            this.manager = null;
+        } else {
+            this.manager = managerOrSearchFn;
+            this.searchFn = null;
+        }
+    }
+
+    /**
+     * Tìm kiếm bài hát qua resolver chung hoặc manager.
+     * @param {string} query
+     * @param {object} [requester]
+     * @returns {Promise<object>}
+     */
+    async search(query, requester) {
+        if (this.searchFn) {
+            return this.searchFn(query, requester);
+        }
+        if (this.manager && typeof this.manager.search === 'function') {
+            return this.manager.search(query, { requester });
+        }
+        return { tracks: [] };
     }
 
     /**
@@ -70,7 +92,7 @@ class AutoplayService {
 
             try {
                 const result = await withTimeout(
-                    this.manager.search(query, { requester }),
+                    this.search(query, requester),
                     AUTOPLAY_SEARCH_TIMEOUT_MS,
                     `autoplay search: ${query}`
                 );
